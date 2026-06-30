@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# WildFly CLI: registra el driver JDBC de PostgreSQL y crea el datasource
+# para la aplicación. Se ejecuta una sola vez en el primer arranque.
+# ---------------------------------------------------------------------------
+
+# 1. Registrar el módulo JDBC como driver
+/subsystem=datasources/jdbc-driver=postgresql:add( \
+    driver-name=postgresql, \
+    driver-module-name=org.postgresql, \
+    driver-xa-datasource-class-name=org.postgresql.xa.PGXADataSource \
+)
+
+# 2. Crear el datasource de la aplicación
+data-source add \
+    --name=AppDS \
+    --jndi-name=java:/jboss/datasources/AppDS \
+    --driver-name=postgresql \
+    --connection-url=jdbc:postgresql://localhost:5432/${env.PGSQL_DB} \
+    --user-name=${env.PGSQL_USER} \
+    --password=${env.PGSQL_PASSWORD} \
+    --valid-connection-checker-class-name=org.jboss.jca.adapters.jdbc.extensions.postgres.PostgreSQLValidConnectionChecker \
+    --exception-sorter-class-name=org.jboss.jca.adapters.jdbc.extensions.postgres.PostgreSQLExceptionSorter \
+    --background-validation=true \
+    --background-validation-millis=30000 \
+    --enabled=true

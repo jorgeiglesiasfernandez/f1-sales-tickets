@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE struts PUBLIC
+    "-//Apache Software Foundation//DTD Struts Configuration 2.5//EN"
+    "http://struts.apache.org/dtds/struts-2.5.dtd">
+
+<struts>
+    <!-- Modo desarrollo para mejores mensajes de error -->
+    <constant name="struts.devMode" value="true" />
+    <constant name="struts.ui.theme" value="simple" />
+    <constant name="struts.convention.result.path" value="/WEB-INF/content/" />
+    
+    <!-- Permitir URLs sin extensión .action -->
+    <constant name="struts.action.extension" value="action,," />
+    
+    <!-- Excluir rutas de la API REST del procesamiento de Struts -->
+    <constant name="struts.action.excludePattern" value="/api/.*" />
+    
+    <package name="f1tickets" extends="struts-default">
+        
+        <!-- Dashboard Actions -->
+        <action name="dashboard" class="com.ticketsales.action.DashboardAction">
+            <result name="success">/WEB-INF/content/dashboard.jsp</result>
+        </action>
+        
+        <!-- Event Actions -->
+        <action name="event-info" class="com.ticketsales.action.EventAction" method="showInfo">
+            <result name="success">/WEB-INF/content/event-info.jsp</result>
+        </action>
+        
+        <action name="event-statistics" class="com.ticketsales.action.EventAction" method="getStatistics">
+            <result name="success">/WEB-INF/content/event-statistics.jsp</result>
+        </action>
+        
+        <!-- Ticket Actions -->
+        <action name="ticket-list" class="com.ticketsales.action.TicketAction" method="list">
+            <result name="success">/WEB-INF/content/ticket-list.jsp</result>
+        </action>
+        
+        <action name="ticket-availability" class="com.ticketsales.action.TicketAction" method="checkAvailability">
+            <result name="success">/WEB-INF/content/ticket-availability.jsp</result>
+        </action>
+        
+        <!-- Purchase Actions -->
+        <action name="purchase-form" class="com.ticketsales.action.PurchaseAction" method="showForm">
+            <result name="success">/WEB-INF/content/purchase-form.jsp</result>
+            <result name="error">/WEB-INF/content/purchase-error.jsp</result>
+        </action>
+        
+        <action name="purchase-process" class="com.ticketsales.action.PurchaseAction" method="processPurchase">
+            <result name="success" type="redirect">purchase-confirmation</result>
+            <result name="input">/WEB-INF/content/purchase-form.jsp</result>
+            <result name="error">/WEB-INF/content/purchase-error.jsp</result>
+        </action>
+        
+        <action name="purchase-confirmation" class="com.ticketsales.action.PurchaseAction" method="confirmation">
+            <result name="success">/WEB-INF/content/purchase-confirmation.jsp</result>
+            <result name="error">/WEB-INF/content/purchase-error.jsp</result>
+        </action>
+        
+        <action name="purchase-list" class="com.ticketsales.action.PurchaseAction" method="list">
+            <result name="success">/WEB-INF/content/purchase-list.jsp</result>
+        </action>
+        
+    </package>
+</struts>
+
+<!-- Made with Bob -->
