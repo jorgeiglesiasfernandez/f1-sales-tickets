@@ -1,0 +1,30 @@
+# ── Maven / build ──────────────────────────────────────────
+target/
+*.war
+*.jar
+!scripts/sql/*.sql
+
+# ── IDEs ───────────────────────────────────────────────────
+.idea/
+*.iml
+.eclipse/
+.classpath
+.project
+.settings/
+*.iws
+
+# ── macOS ──────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+
+# ── Herramientas locales ────────────────────────────────────
+.bob/
+*.log
+
+# ── Variables de entorno / secretos ────────────────────────
+.env
+*.env
+application.local.properties
+
+# ── Docs ────────────────────────
+docs/

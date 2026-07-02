@@ -1,13 +1,13 @@
 # ===========================================================================
-# Stage 1 — Builder: compila el WAR con Maven
-# La imagen eclipse-temurin es multi-arch (amd64 + arm64) — el build se
-# ejecuta siempre en la arquitectura nativa del nodo que construye.
+# Stage 1 — Builder: compiles the WAR with Maven
+# eclipse-temurin is a multi-arch image (amd64 + arm64) — the build always
+# runs on the native architecture of the node performing the build.
 # ===========================================================================
 FROM docker.io/library/maven:3.9-eclipse-temurin-8 AS builder
 
 WORKDIR /build
 COPY pom.xml .
-# Descarga de dependencias en capa separada para aprovechar caché
+# Download dependencies in a separate layer to leverage Docker cache
 RUN mvn dependency:go-offline -q
 
 COPY src/ src/
@@ -15,12 +15,12 @@ RUN mvn clean package -q -DskipTests
 
 # ===========================================================================
 # Stage 2 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
-# TARGETARCH es inyectada automáticamente por BuildKit (amd64 / arm64)
+# TARGETARCH is injected automatically by BuildKit (amd64 / arm64)
 # ===========================================================================
 FROM docker.io/library/almalinux:8
 
 LABEL maintainer="local-dev"
-LABEL description="Monolito AlmaLinux 8: WildFly 18 + PostgreSQL 15"
+LABEL description="Monolith AlmaLinux 8: WildFly 18 + PostgreSQL 15"
 
 ARG TARGETARCH
 
@@ -34,7 +34,7 @@ ENV WILDFLY_VERSION=18.0.1.Final \
     PG_VERSION=15
 
 # ---------------------------------------------------------------------------
-# 1. Repositorios — se selecciona el RPM PGDG según arquitectura del nodo
+# 1. Repositories — PGDG RPM selected based on the node architecture
 # ---------------------------------------------------------------------------
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
     && dnf install -y \
@@ -43,7 +43,7 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
     && dnf clean all
 
 # ---------------------------------------------------------------------------
-# 2. Dependencias del sistema
+# 2. System dependencies
 # ---------------------------------------------------------------------------
 RUN dnf install -y \
         java-1.8.0-openjdk-headless \
@@ -61,7 +61,7 @@ RUN dnf install -y \
     && dnf clean all
 
 # ---------------------------------------------------------------------------
-# 3. WildFly
+# 3. WildFly application server
 # ---------------------------------------------------------------------------
 RUN curl -fsSL \
     "https://download.jboss.org/wildfly/${WILDFLY_VERSION}/wildfly-${WILDFLY_VERSION}.tar.gz" \
@@ -71,7 +71,7 @@ RUN curl -fsSL \
     && rm /tmp/wildfly.tar.gz
 
 # ---------------------------------------------------------------------------
-# 4. Driver JDBC de PostgreSQL como módulo WildFly
+# 4. PostgreSQL JDBC driver registered as a WildFly module
 # ---------------------------------------------------------------------------
 RUN JDBC_JAR="postgresql-${PG_JDBC_VERSION}.jar" \
     && MODULE_DIR="${WILDFLY_HOME}/modules/org/postgresql/main" \
@@ -93,25 +93,36 @@ RUN JDBC_JAR="postgresql-${PG_JDBC_VERSION}.jar" \
 EOF
 
 # ---------------------------------------------------------------------------
-# 5. Configuración de supervisord y scripts
+# 5. supervisord config, init scripts and simulation scripts
 # ---------------------------------------------------------------------------
 COPY config/supervisord.conf          /etc/supervisord.conf
 COPY config/wildfly-ds.cli            /opt/wildfly-ds.cli
 COPY scripts/init-db.sh               /docker-entrypoint-initdb.d/init-db.sh
 COPY scripts/sql/01-schema.sql        /docker-entrypoint-initdb.d/01-schema.sql
 COPY scripts/sql/02-seed.sql          /docker-entrypoint-initdb.d/02-seed.sql
+# Wave 1 simulated purchases — applied automatically on first boot
+COPY scripts/sql/03-purchases-auto.sql /docker-entrypoint-initdb.d/03-purchases-auto.sql
 COPY scripts/entrypoint.sh            /entrypoint.sh
-RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh /entrypoint.sh
+# Manual simulation scripts — available inside the container under /scripts/
+COPY scripts/load-tickets.sh              /scripts/load-tickets.sh
+COPY scripts/simulate-purchases-wave2.sh  /scripts/simulate-purchases-wave2.sh
+COPY scripts/simulate-purchases-wave3.sh  /scripts/simulate-purchases-wave3.sh
+RUN chmod +x \
+        /docker-entrypoint-initdb.d/init-db.sh \
+        /entrypoint.sh \
+        /scripts/load-tickets.sh \
+        /scripts/simulate-purchases-wave2.sh \
+        /scripts/simulate-purchases-wave3.sh
 
 # ---------------------------------------------------------------------------
-# 6. Aplicación — WAR compilado en el stage builder
+# 6. Application — WAR built in the builder stage
 # ---------------------------------------------------------------------------
 COPY --from=builder /build/target/f1-sales-tickets.war \
      ${WILDFLY_HOME}/standalone/deployments/f1-sales-tickets.war
 
 # ---------------------------------------------------------------------------
-# Puertos expuestos
-# 8080 → HTTP app  |  9990 → Admin WildFly  |  5432 → PostgreSQL (dev)
+# Exposed ports
+# 8080 → HTTP app  |  9990 → WildFly Admin  |  5432 → PostgreSQL (dev)
 # ---------------------------------------------------------------------------
 EXPOSE 8080 9990 5432
 

@@ -24,3 +24,8 @@ echo "→ Cargando datos iniciales..."
 psql -v ON_ERROR_STOP=1 --username "${PGSQL_USER}" --dbname "${PGSQL_DB}" \
     -f /docker-entrypoint-initdb.d/02-seed.sql
 echo "✓ Datos iniciales cargados."
+
+echo "→ Cargando compras simuladas (wave 1)..."
+psql -v ON_ERROR_STOP=1 --username "${PGSQL_USER}" --dbname "${PGSQL_DB}" \
+    -f /docker-entrypoint-initdb.d/03-purchases-auto.sql
+echo "✓ Compras simuladas (wave 1) cargadas."
