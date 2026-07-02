@@ -1,11 +1,29 @@
+# ===========================================================================
+# Stage 1 — Builder: compila el WAR con Maven
+# La imagen eclipse-temurin es multi-arch (amd64 + arm64) — el build se
+# ejecuta siempre en la arquitectura nativa del nodo que construye.
+# ===========================================================================
+FROM docker.io/library/maven:3.9-eclipse-temurin-8 AS builder
+
+WORKDIR /build
+COPY pom.xml .
+# Descarga de dependencias en capa separada para aprovechar caché
+RUN mvn dependency:go-offline -q
+
+COPY src/ src/
+RUN mvn clean package -q -DskipTests
+
+# ===========================================================================
+# Stage 2 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
+# TARGETARCH es inyectada automáticamente por BuildKit (amd64 / arm64)
+# ===========================================================================
 FROM docker.io/library/almalinux:8
 
 LABEL maintainer="local-dev"
-LABEL description="Monolito AlmaLinux 8: WildFly 26 + PostgreSQL 15"
+LABEL description="Monolito AlmaLinux 8: WildFly 18 + PostgreSQL 15"
 
-# ---------------------------------------------------------------------------
-# Variables configurables
-# ---------------------------------------------------------------------------
+ARG TARGETARCH
+
 ENV WILDFLY_VERSION=18.0.1.Final \
     WILDFLY_HOME=/opt/wildfly \
     PGSQL_DATA=/var/lib/pgsql/15/data \
@@ -16,12 +34,11 @@ ENV WILDFLY_VERSION=18.0.1.Final \
     PG_VERSION=15
 
 # ---------------------------------------------------------------------------
-# 1. Repositorios — todos públicos, sin suscripción
-#    - AlmaLinux BaseOS + AppStream: incluidos por defecto
-#    - PGDG: repo oficial de PostgreSQL para EL8 (aarch64)
+# 1. Repositorios — se selecciona el RPM PGDG según arquitectura del nodo
 # ---------------------------------------------------------------------------
-RUN dnf install -y \
-        https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm \
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
+    && dnf install -y \
+        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-${ARCH}/pgdg-redhat-repo-latest.noarch.rpm" \
     && dnf -y module disable postgresql \
     && dnf clean all
 
@@ -87,10 +104,9 @@ COPY scripts/entrypoint.sh            /entrypoint.sh
 RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh /entrypoint.sh
 
 # ---------------------------------------------------------------------------
-# 6. Aplicación — autodeploy al arrancar WildFly
-#    Requiere haber ejecutado antes: mvn clean package
+# 6. Aplicación — WAR compilado en el stage builder
 # ---------------------------------------------------------------------------
-COPY target/f1-sales-tickets.war \
+COPY --from=builder /build/target/f1-sales-tickets.war \
      ${WILDFLY_HOME}/standalone/deployments/f1-sales-tickets.war
 
 # ---------------------------------------------------------------------------
