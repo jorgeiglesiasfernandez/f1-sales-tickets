@@ -121,6 +121,16 @@ COPY --from=builder /build/target/f1-sales-tickets.war \
      ${WILDFLY_HOME}/standalone/deployments/f1-sales-tickets.war
 
 # ---------------------------------------------------------------------------
+# 7. AMA Discovery Tool
+# ---------------------------------------------------------------------------
+COPY ama-discovery-tool-linux/DiscoveryTool-Linux_f1_sales_tickets.tgz \
+     /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz
+RUN chmod 777 /opt/ama-discovery-tool \
+    && tar xvzf /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz \
+         -C /opt/ama-discovery-tool \
+    && rm /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz
+
+# ---------------------------------------------------------------------------
 # Exposed ports
 # 8080 → HTTP app  |  9990 → WildFly Admin  |  5432 → PostgreSQL (dev)
 # ---------------------------------------------------------------------------
