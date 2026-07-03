@@ -121,14 +121,26 @@ COPY --from=builder /build/target/f1-sales-tickets.war \
      ${WILDFLY_HOME}/standalone/deployments/f1-sales-tickets.war
 
 # ---------------------------------------------------------------------------
-# 7. AMA Discovery Tool
+# 7. AMA Discovery Tool — only for x86_64 (amd64)
+#
+# Docker COPY does not support conditionals, so we use an intermediate stage
+# that holds the extracted tool. On non-amd64 builds the COPY --from produces
+# an empty result because the source stage simply has nothing at that path.
 # ---------------------------------------------------------------------------
+FROM docker.io/library/almalinux:8 AS ama-tool
+ARG TARGETARCH
+RUN mkdir -p /opt/ama-discovery-tool && chmod 777 /opt/ama-discovery-tool
 COPY ama-discovery-tool-linux/DiscoveryTool-Linux_f1_sales_tickets.tgz \
      /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz
-RUN chmod 777 /opt/ama-discovery-tool \
-    && tar xvzf /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz \
-         -C /opt/ama-discovery-tool \
-    && rm /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        tar xzf /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz \
+            -C /opt/ama-discovery-tool \
+        && rm /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz; \
+    else \
+        rm -f /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz; \
+    fi
+
+COPY --from=ama-tool /opt/ama-discovery-tool /opt/ama-discovery-tool
 
 # ---------------------------------------------------------------------------
 # Exposed ports
