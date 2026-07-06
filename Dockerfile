@@ -62,9 +62,16 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
 
 # ---------------------------------------------------------------------------
 # 2. System dependencies
+# Notes on Java:
+#   - java-1.8.0-openjdk-headless → Java 8  (class version 52) required by WildFly 18
+#   - java-11-openjdk-headless    → Java 11 (class version 55) required by AMA Discovery Tool
+#   JAVA_HOME keeps pointing to Java 8 so WildFly starts correctly.
+#   To run AMA Discovery Tool use JAVA_HOME for Java 11:
+#     JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java11)))) ./bin/ama-discovery ...
 # ---------------------------------------------------------------------------
 RUN dnf install -y \
         java-1.8.0-openjdk-headless \
+        java-11-openjdk-headless \
         python3 \
         python3-pip \
         curl \
