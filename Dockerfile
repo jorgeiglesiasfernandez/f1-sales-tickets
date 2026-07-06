@@ -132,12 +132,14 @@ COPY scripts/entrypoint.sh            /entrypoint.sh
 COPY scripts/load-tickets.sh              /scripts/load-tickets.sh
 COPY scripts/simulate-purchases-wave2.sh  /scripts/simulate-purchases-wave2.sh
 COPY scripts/simulate-purchases-wave3.sh  /scripts/simulate-purchases-wave3.sh
+COPY scripts/simulate-purchases-random.sh /scripts/simulate-purchases-random.sh
 RUN chmod +x \
         /docker-entrypoint-initdb.d/init-db.sh \
         /entrypoint.sh \
         /scripts/load-tickets.sh \
         /scripts/simulate-purchases-wave2.sh \
-        /scripts/simulate-purchases-wave3.sh
+        /scripts/simulate-purchases-wave3.sh \
+        /scripts/simulate-purchases-random.sh
 
 # ---------------------------------------------------------------------------
 # 6. Application — WAR built in the builder stage
