@@ -15,11 +15,14 @@ RUN mvn clean package -q -DskipTests
 
 # ===========================================================================
 # Stage 2 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
+# TARGETARCH is injected automatically by BuildKit (amd64 / arm64)
 # ===========================================================================
 FROM docker.io/library/almalinux:8
 
 LABEL maintainer="local-dev"
 LABEL description="Monolith AlmaLinux 8: WildFly 18 + PostgreSQL 15"
+
+ARG TARGETARCH
 
 ENV WILDFLY_VERSION=18.0.1.Final \
     WILDFLY_HOME=/opt/wildfly \
@@ -31,10 +34,13 @@ ENV WILDFLY_VERSION=18.0.1.Final \
     PG_VERSION=15
 
 # ---------------------------------------------------------------------------
-# 1. Repositories — PGDG RPM
+# 1. Repositories — PGDG RPM selected based on the node architecture
 # ---------------------------------------------------------------------------
-RUN dnf install -y \
-        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm" \
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
+    && dnf install -y --nogpgcheck \
+        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-${ARCH}/pgdg-redhat-repo-latest.noarch.rpm" \
+    && sed -i 's/^gpgcheck=1/gpgcheck=0/g' /etc/yum.repos.d/pgdg*.repo \
+    && sed -i 's/^repo_gpgcheck=1/repo_gpgcheck=0/g' /etc/yum.repos.d/pgdg*.repo \
     && dnf -y module disable postgresql \
     && dnf clean all
 
