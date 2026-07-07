@@ -45,7 +45,26 @@ subjects:
 
 ---
 # ------------------------------------------------------------------------------
-# 3. Secret — PostgreSQL credentials
+# 3. ClusterRoleBinding — allows anonymous users to trigger webhooks
+#    Required so GitHub can call the BuildConfig webhook endpoint without auth.
+#    Requires kubeadmin session
+# ------------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: f1-webhook-anonymous
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:webhook
+subjects:
+- kind: User
+  name: system:anonymous
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ------------------------------------------------------------------------------
+# 5. Secret — PostgreSQL credentials
 # ------------------------------------------------------------------------------
 apiVersion: v1
 kind: Secret
@@ -60,7 +79,7 @@ stringData:
 
 ---
 # ------------------------------------------------------------------------------
-# 4. PersistentVolumeClaim — PostgreSQL data directory (2 Gi)
+# 6. PersistentVolumeClaim — PostgreSQL data directory (2 Gi)
 #    Stays in Pending until the Deployment mounts the volume — this is expected.
 # ------------------------------------------------------------------------------
 apiVersion: v1
@@ -78,7 +97,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 5. ImageStream — target for the image built by the BuildConfig
+# 7. ImageStream — target for the image built by the BuildConfig
 # ------------------------------------------------------------------------------
 apiVersion: image.openshift.io/v1
 kind: ImageStream
@@ -88,20 +107,20 @@ metadata:
 
 ---
 # ------------------------------------------------------------------------------
-# 6. BuildConfig — builds the image from the GitHub repository
-#    ⚠️  Replace <TU_USUARIO> with your GitHub username
+# 8. BuildConfig — builds the image from the GitHub repository
 # ------------------------------------------------------------------------------
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
   name: f1-tickets
   namespace: f1-tickets
-  annotations:
-    # Prevents the build from starting automatically when the BuildConfig is created.
-    # Trigger it manually once the ImageStream exists:
-    #   oc start-build f1-tickets -n f1-tickets --follow
-    image.openshift.io/triggers: "[]"
 spec:
+  triggers:
+  - type: Generic
+    generic:
+      secret: f1ocp2026
+      allowEnv: false
+  - type: ImageChange
   source:
     type: Git
     git:
@@ -118,13 +137,17 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 7. Deployment — runs the WildFly 18 + PostgreSQL 15 monolith
+# 9. Deployment — runs the WildFly 18 + PostgreSQL 15 monolith
 # ------------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: f1-tickets
   namespace: f1-tickets
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"f1-tickets:latest","namespace":"f1-tickets"},
+        "fieldPath":"spec.template.spec.containers[?(@.name==\"f1-tickets\")].image"}]
 spec:
   replicas: 1
   selector:
@@ -167,7 +190,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 8. Service — exposes HTTP port 8080 internally
+# 10. Service — exposes HTTP port 8080 internally
 # ------------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
@@ -184,7 +207,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 9. Route — exposes the app externally
+# 11. Route — exposes the app externally
 #    TLS edge termination: the router handles HTTPS and forwards HTTP to the pod.
 #    CRC:  http://f1-tickets-f1-tickets.apps-crc.testing/f1-tickets
 #    OCP:  https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
