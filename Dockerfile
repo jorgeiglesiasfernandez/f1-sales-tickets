@@ -14,33 +14,12 @@ COPY src/ src/
 RUN mvn clean package -q -DskipTests
 
 # ===========================================================================
-# Stage 2 — AMA Discovery Tool (x86_64 only)
-# Extracts the tool only when TARGETARCH=amd64; otherwise leaves the dir empty.
-# Must be declared before the runtime stage so COPY --from=ama-tool resolves.
-# ===========================================================================
-FROM docker.io/library/almalinux:8 AS ama-tool
-ARG TARGETARCH
-RUN mkdir -p /opt/ama-discovery-tool && chmod 777 /opt/ama-discovery-tool
-COPY ama-discovery-tool-linux/DiscoveryTool-Linux_f1_sales_tickets.tgz \
-     /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        tar xzf /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz \
-            -C /opt/ama-discovery-tool \
-        && rm /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz; \
-    else \
-        rm -f /opt/ama-discovery-tool/DiscoveryTool-Linux_f1_sales_tickets.tgz; \
-    fi
-
-# ===========================================================================
-# Stage 3 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
-# TARGETARCH is injected automatically by BuildKit (amd64 / arm64)
+# Stage 2 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
 # ===========================================================================
 FROM docker.io/library/almalinux:8
 
 LABEL maintainer="local-dev"
 LABEL description="Monolith AlmaLinux 8: WildFly 18 + PostgreSQL 15"
-
-ARG TARGETARCH
 
 ENV WILDFLY_VERSION=18.0.1.Final \
     WILDFLY_HOME=/opt/wildfly \
@@ -52,11 +31,10 @@ ENV WILDFLY_VERSION=18.0.1.Final \
     PG_VERSION=15
 
 # ---------------------------------------------------------------------------
-# 1. Repositories — PGDG RPM selected based on the node architecture
+# 1. Repositories — PGDG RPM
 # ---------------------------------------------------------------------------
-RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
-    && dnf install -y \
-        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-${ARCH}/pgdg-redhat-repo-latest.noarch.rpm" \
+RUN dnf install -y \
+        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm" \
     && dnf -y module disable postgresql \
     && dnf clean all
 
@@ -64,14 +42,10 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
 # 2. System dependencies
 # Notes on Java:
 #   - java-1.8.0-openjdk-headless → Java 8  (class version 52) required by WildFly 18
-#   - java-11-openjdk-headless    → Java 11 (class version 55) required by AMA Discovery Tool
 #   JAVA_HOME keeps pointing to Java 8 so WildFly starts correctly.
-#   To run AMA Discovery Tool use JAVA_HOME for Java 11:
-#     JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java11)))) ./bin/ama-discovery ...
 # ---------------------------------------------------------------------------
 RUN dnf install -y \
         java-1.8.0-openjdk-headless \
-        java-11-openjdk-headless \
         python3 \
         python3-pip \
         curl \
@@ -146,11 +120,6 @@ RUN chmod +x \
 # ---------------------------------------------------------------------------
 COPY --from=builder /build/target/f1-sales-tickets.war \
      ${WILDFLY_HOME}/standalone/deployments/f1-sales-tickets.war
-
-# ---------------------------------------------------------------------------
-# 7. AMA Discovery Tool — only for x86_64 (amd64)
-# ---------------------------------------------------------------------------
-COPY --from=ama-tool /opt/ama-discovery-tool /opt/ama-discovery-tool
 
 # ---------------------------------------------------------------------------
 # Exposed ports
