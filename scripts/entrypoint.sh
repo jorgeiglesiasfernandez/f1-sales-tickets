@@ -11,10 +11,12 @@ INIT_FLAG="${PGSQL_DATA}/.initialized"
 # ---------------------------------------------------------------------------
 # 1. Inicializar clúster de PostgreSQL (solo la primera vez)
 # ---------------------------------------------------------------------------
+# Garantizar permisos correctos siempre (el PVC puede montarse como root en OCP)
+mkdir -p "${PGSQL_DATA}"
+chown -R postgres:postgres "${PGSQL_DATA}"
+
 if [[ ! -f "${INIT_FLAG}" ]]; then
     echo "→ Inicializando clúster PostgreSQL en ${PGSQL_DATA}..."
-    mkdir -p "${PGSQL_DATA}"
-    chown postgres:postgres "${PGSQL_DATA}"
     su -s /bin/bash postgres -c "${PG_BIN}/initdb -D ${PGSQL_DATA}"
 
     # Permitir conexiones locales con contraseña (md5)
