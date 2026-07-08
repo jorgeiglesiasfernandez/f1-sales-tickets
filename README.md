@@ -397,16 +397,3 @@ oc rollout status deployment/f1-tickets -n f1-tickets
 ```
 
 ---
-
-## VM Simulation
-
-The `Deployment` is configured with **Guaranteed QoS** resource requests and limits to simulate the footprint of a large virtual machine. 
-
-| Resource | Request = Limit | VM equivalent |
-|---|---|---|
-| CPU | `8000m` | 8 vCPU |
-| Memory | `16Gi` | 16 GB RAM |
-| Ephemeral storage | `40Gi` | 40 GB local disk |
-| Persistent storage (PVC) | `2Gi` | PostgreSQL data disk |
-
-> **QoS class: Guaranteed** — `requests == limits` ensures charges the full VM profile cost without proration. The PVC is billed separately as persistent storage cost.

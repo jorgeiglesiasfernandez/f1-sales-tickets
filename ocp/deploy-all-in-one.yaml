@@ -161,15 +161,6 @@ spec:
       containers:
       - name: f1-tickets
         image: image-registry.openshift-image-registry.svc:5000/f1-tickets/f1-tickets:latest
-        resources:
-          requests:
-            cpu: "8000m"
-            memory: "16Gi"
-            ephemeral-storage: "40Gi"
-          limits:
-            cpu: "8000m"
-            memory: "16Gi"
-            ephemeral-storage: "40Gi"
         ports:
         - containerPort: 8080
         - containerPort: 9990
