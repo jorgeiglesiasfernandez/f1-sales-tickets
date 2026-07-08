@@ -279,6 +279,8 @@ f1-sales-tickets/
 ├── config/
 │   ├── supervisord.conf              supervisord process definitions
 │   └── wildfly-ds.cli                WildFly CLI datasource configuration
+├── ocp/
+│   └── deploy-all-in-one.yaml        Full OpenShift deployment manifest (11 resources)
 ├── scripts/
 │   ├── entrypoint.sh                    Container entrypoint
 │   ├── init-db.sh                       PostgreSQL initialisation script
@@ -295,3 +297,116 @@ f1-sales-tickets/
     ├── resources/struts.xml         Struts 2 action mappings
     └── webapp/                      JSP views + web descriptors
 ```
+
+---
+
+## OpenShift Deployment
+
+The [`ocp/deploy-all-in-one.yaml`](ocp/deploy-all-in-one.yaml) manifest deploys all required resources in a single file. It contains 11 resources applied in order:
+
+| # | Resource | Description |
+|---|---|---|
+| 1 | `ProjectRequest` | Creates the `f1-tickets` namespace |
+| 2 | `ClusterRoleBinding` anyuid | Allows the pod to run as root (required by PostgreSQL) |
+| 3 | `ClusterRoleBinding` webhook | Allows GitHub to call the OCP webhook without authentication |
+| 4 | `Secret` | PostgreSQL credentials |
+| 5 | `PersistentVolumeClaim` | 2 Gi volume for PostgreSQL data |
+| 6 | `ImageStream` | Target for the image built by the BuildConfig |
+| 7 | `BuildConfig` | Builds the image from GitHub; triggered by webhook on push |
+| 8 | `Deployment` | Runs the WildFly 18 + PostgreSQL 15 monolith |
+| 9 | `Service` | Exposes port 8080 internally |
+| 10 | `Route` | Exposes the app externally with TLS edge termination |
+
+### Prerequisites
+
+Before applying the manifest, replace the following placeholders:
+
+| Placeholder | Description | Example |
+|---|---|---|
+| `<STORAGE_CLASSNAME>` | Storage class for the PVC | `crc-csi-hostpath-provisioner` (CRC) / `kubevirt-csi-infra-default` (OCP) |
+
+### Apply
+
+```bash
+# Requires kubeadmin session for cluster-scoped resources
+oc apply -f ocp/deploy-all-in-one.yaml
+
+# Trigger the first build manually
+oc start-build f1-tickets -n f1-tickets --follow
+
+# Watch the rollout
+oc rollout status deployment/f1-tickets -n f1-tickets
+```
+
+### Access
+
+| Environment | URL |
+|---|---|
+| CRC | `http://f1-tickets-f1-tickets.apps-crc.testing/f1-tickets` |
+| OCP | `https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets` |
+
+---
+
+## CI/CD — Automatic Build on Git Push
+
+The `BuildConfig` is configured with a **Generic Webhook** trigger. Every `git push` to `main` automatically starts a new OCP build and rolls out the updated image.
+
+### Flow
+
+```
+git push main
+    └─▶ GitHub Webhook (POST)
+            └─▶ OCP BuildConfig (Docker strategy)
+                    └─▶ ImageStream f1-tickets:latest
+                            └─▶ Deployment rollout (automatic via image trigger)
+```
+
+### Webhook URL structure
+
+```
+https://<OCP_API_SERVER>:6443/apis/build.openshift.io/v1/namespaces/f1-tickets/buildconfigs/f1-tickets/webhooks/f1ocp2026/generic
+```
+
+Obtain the URL from the cluster:
+
+```bash
+oc describe bc/f1-tickets -n f1-tickets | grep -A2 "Webhook Generic"
+```
+
+### GitHub Webhook configuration
+
+| Field | Value |
+|---|---|
+| Payload URL | URL obtained above |
+| Content type | `application/json` |
+| Secret | `f1ocp2026` |
+| SSL verification | Enable (valid cert) / Disable (self-signed) |
+| Events | `Just the push event` |
+
+### Verify the pipeline
+
+```bash
+# Force a build manually
+oc start-build f1-tickets -n f1-tickets --follow
+
+# Watch builds
+oc get builds -n f1-tickets -w
+
+# Watch rollout
+oc rollout status deployment/f1-tickets -n f1-tickets
+```
+
+---
+
+## VM Simulation
+
+The `Deployment` is configured with **Guaranteed QoS** resource requests and limits to simulate the footprint of a large virtual machine. 
+
+| Resource | Request = Limit | VM equivalent |
+|---|---|---|
+| CPU | `8000m` | 8 vCPU |
+| Memory | `16Gi` | 16 GB RAM |
+| Ephemeral storage | `40Gi` | 40 GB local disk |
+| Persistent storage (PVC) | `2Gi` | PostgreSQL data disk |
+
+> **QoS class: Guaranteed** — `requests == limits` ensures charges the full VM profile cost without proration. The PVC is billed separately as persistent storage cost.
