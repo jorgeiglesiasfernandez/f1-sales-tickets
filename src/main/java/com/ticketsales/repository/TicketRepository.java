@@ -397,6 +397,39 @@ public class TicketRepository {
     }
     
     /**
+     * Crea un nuevo ticket en la base de datos.
+     * Devuelve el ticket creado, o null si ya existe (ON CONFLICT).
+     */
+    public Ticket createTicket(Ticket ticket) {
+        Connection conn = null;
+        PreparedStatement stmt = null;
+
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "INSERT INTO tickets (id, event_id, tipo, precio, asiento, seccion, disponible) " +
+                         "VALUES (?, ?, ?, ?, ?, ?, TRUE) " +
+                         "ON CONFLICT (event_id, asiento) DO NOTHING";
+
+            stmt = conn.prepareStatement(sql);
+            stmt.setString(1, ticket.getId());
+            stmt.setString(2, ticket.getEventId());
+            stmt.setString(3, ticket.getTipo().name());
+            stmt.setBigDecimal(4, ticket.getPrecio());
+            stmt.setString(5, ticket.getAsiento());
+            stmt.setString(6, ticket.getSeccion());
+
+            int rows = stmt.executeUpdate();
+            return rows > 0 ? ticket : null;
+
+        } catch (SQLException e) {
+            LOGGER.log(Level.SEVERE, "Error al crear ticket", e);
+            return null;
+        } finally {
+            DatabaseConnection.closeResources(conn, stmt, null);
+        }
+    }
+
+    /**
      * Resetea todos los tickets (los marca como disponibles)
      * ADVERTENCIA: Este método es solo para pruebas
      */

@@ -1,163 +1,125 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# load-tickets.sh — Carga tickets adicionales en la BD desde dentro del contenedor
+# load-tickets.sh — Carga tickets adicionales a través de la API REST
 #
 # Uso:
-#   ./scripts/load-tickets.sh
+#   ./scripts/load-tickets.sh [BASE_URL]
+#
+#   BASE_URL por defecto: http://localhost:8080/f1-sales-tickets
 #
 # Añade:
 #   - 48  entradas VIP     (secciones V3..V4, 24 asientos cada una)
 #   - 167 entradas GENERAL (secciones G9..G16, 20 asientos por sección + 7 en G17)
 #
-# Los IDs y asientos usan rangos distintos a los del seed inicial para evitar
-# conflictos. El script es idempotente: volver a ejecutarlo no duplica datos
-# (ON CONFLICT DO NOTHING).
+# Idempotente: la API responde 200 si el asiento ya existe (ON CONFLICT DO NOTHING).
+# Requiere: curl, jq (opcional para validar respuestas)
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
-: "${PGSQL_USER:=appuser}"
-: "${PGSQL_PASSWORD:=apppassword}"
-: "${PGSQL_DB:=appdb}"
-
-PSQL="psql -v ON_ERROR_STOP=1 --username ${PGSQL_USER} --dbname ${PGSQL_DB}"
+BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-sales-tickets}}"
+EVENT_ID="${EVENT_ID:-F1-2026-ESP}"
+TICKETS_URL="${BASE_URL}/api/tickets"
 
 echo "============================================================"
-echo " load-tickets.sh"
-echo " Usuario  : ${PGSQL_USER}"
-echo " Base datos: ${PGSQL_DB}"
+echo " load-tickets.sh (vía API REST)"
+echo " Endpoint : ${TICKETS_URL}"
+echo " Evento   : ${EVENT_ID}"
 echo "============================================================"
 
-# -----------------------------------------------------------------------------
-# 1. Verificar que el evento existe
-# -----------------------------------------------------------------------------
-EVENT_EXISTS=$(psql --username "${PGSQL_USER}" --dbname "${PGSQL_DB}" -tAc \
-    "SELECT COUNT(*) FROM events WHERE id = 'F1-2026-ESP';")
+# Función auxiliar: crear un ticket vía POST /api/tickets
+# Args: $1=tipo  $2=asiento  $3=seccion
+post_ticket() {
+    local tipo="$1"
+    local asiento="$2"
+    local seccion="$3"
 
-if [ "${EVENT_EXISTS}" = "0" ]; then
-    echo "✗ El evento 'F1-2026-ESP' no existe. Ejecuta primero init-db.sh."
-    exit 1
-fi
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "${TICKETS_URL}" \
+        -H "Content-Type: application/json" \
+        -d "{\"eventId\":\"${EVENT_ID}\",\"tipo\":\"${tipo}\",\"asiento\":\"${asiento}\",\"seccion\":\"${seccion}\"}")
+
+    if [ "${http_code}" != "201" ] && [ "${http_code}" != "200" ]; then
+        echo "  ✗ Error HTTP ${http_code} — ${tipo} asiento=${asiento}"
+        return 1
+    fi
+}
 
 # -----------------------------------------------------------------------------
-# 2. Tickets VIP — 48 asientos
+# 1. Tickets VIP — 48 asientos
 #    Secciones V3 y V4, 24 asientos por sección (filas A-D, 6 asientos/fila)
-#    IDs: TKT-V201 .. TKT-V248
-#    Precio: 450.00
+#    Precio: 450.00 (fijado en el enum TipoEntrada)
 # -----------------------------------------------------------------------------
 echo ""
 echo "→ Cargando 48 entradas VIP (secciones V3, V4)..."
 
-${PSQL} <<'SQL'
-INSERT INTO tickets (id, event_id, tipo, precio, asiento, seccion, disponible)
-SELECT
-    'TKT-V' || LPAD((200 + num)::text, 3, '0'),
-    'F1-2026-ESP',
-    'VIP',
-    450.00,
-    'V' || seccion || '-' || CHR(64 + fila) || LPAD(asiento_num::text, 2, '0'),
-    'V' || seccion,
-    TRUE
-FROM (
-    SELECT
-        (seccion - 1) * 24 + (fila - 1) * 6 + asiento_num AS num,
-        seccion + 2                                         AS seccion,   -- V3, V4
-        fila,
-        asiento_num
-    FROM
-        generate_series(1, 2) AS seccion,     -- 2 secciones
-        generate_series(1, 4) AS fila,        -- 4 filas (A-D)
-        generate_series(1, 6) AS asiento_num  -- 6 asientos por fila
-) sub
-ON CONFLICT (event_id, asiento) DO NOTHING;
-SQL
+vip_ok=0
+for seccion_num in 3 4; do
+    seccion="V${seccion_num}"
+    for fila_num in 1 2 3 4; do
+        fila=$(printf "\\x$(printf '%02x' $((64 + fila_num)))")   # A=1 → A, etc.
+        for asiento_num in $(seq 1 6); do
+            asiento="${seccion}-${fila}$(printf '%02d' "${asiento_num}")"
+            post_ticket "VIP" "${asiento}" "${seccion}"
+            vip_ok=$((vip_ok + 1))
+        done
+    done
+done
 
-VIP_INS=$(${PSQL} -tAc "SELECT COUNT(*) FROM tickets WHERE tipo='VIP' AND seccion IN ('V3','V4') AND event_id='F1-2026-ESP';")
-echo "✓ Entradas VIP en V3/V4: ${VIP_INS}"
+echo "✓ Entradas VIP enviadas a la API: ${vip_ok}"
 
 # -----------------------------------------------------------------------------
-# 3. Tickets GENERAL — 167 asientos
-#    Secciones G9..G16: 20 asientos cada una (filas A-D, 5 asientos/fila) = 160
-#    Sección G17: 7 asientos (fila A, asientos 01-07)
-#    IDs: TKT-0801 .. TKT-0967
-#    Precio: 150.00
+# 2. Tickets GENERAL — 160 asientos
+#    Secciones G9..G16, 20 asientos por sección (filas A-D, 5 asientos/fila)
 # -----------------------------------------------------------------------------
 echo ""
 echo "→ Cargando 160 entradas GENERAL (secciones G9..G16)..."
 
-${PSQL} <<'SQL'
-INSERT INTO tickets (id, event_id, tipo, precio, asiento, seccion, disponible)
-SELECT
-    'TKT-' || LPAD((800 + num)::text, 4, '0'),
-    'F1-2026-ESP',
-    'GENERAL',
-    150.00,
-    'G' || seccion || '-' || CHR(64 + fila) || LPAD(asiento_num::text, 2, '0'),
-    'G' || seccion,
-    TRUE
-FROM (
-    SELECT
-        (seccion - 1) * 20 + (fila - 1) * 5 + asiento_num AS num,
-        seccion + 8                                         AS seccion,   -- G9..G16
-        fila,
-        asiento_num
-    FROM
-        generate_series(1, 8) AS seccion,     -- 8 secciones
-        generate_series(1, 4) AS fila,        -- 4 filas (A-D)
-        generate_series(1, 5) AS asiento_num  -- 5 asientos por fila
-) sub
-ON CONFLICT (event_id, asiento) DO NOTHING;
-SQL
+gen_ok=0
+for seccion_num in $(seq 9 16); do
+    seccion="G${seccion_num}"
+    for fila_num in 1 2 3 4; do
+        fila=$(printf "\\x$(printf '%02x' $((64 + fila_num)))")
+        for asiento_num in $(seq 1 5); do
+            asiento="${seccion}-${fila}$(printf '%02d' "${asiento_num}")"
+            post_ticket "GENERAL" "${asiento}" "${seccion}"
+            gen_ok=$((gen_ok + 1))
+        done
+    done
+done
 
+echo "✓ Entradas GENERAL G9-G16 enviadas a la API: ${gen_ok}"
+
+# -----------------------------------------------------------------------------
+# 3. Tickets GENERAL — 7 asientos extra
+#    Sección G17, fila A, asientos 01-07
+# -----------------------------------------------------------------------------
+echo ""
 echo "→ Cargando 7 entradas GENERAL (sección G17, fila A)..."
 
-${PSQL} <<'SQL'
-INSERT INTO tickets (id, event_id, tipo, precio, asiento, seccion, disponible)
-SELECT
-    'TKT-' || LPAD((960 + asiento_num)::text, 4, '0'),
-    'F1-2026-ESP',
-    'GENERAL',
-    150.00,
-    'G17-A' || LPAD(asiento_num::text, 2, '0'),
-    'G17',
-    TRUE
-FROM generate_series(1, 7) AS asiento_num
-ON CONFLICT (event_id, asiento) DO NOTHING;
-SQL
+g17_ok=0
+for asiento_num in $(seq 1 7); do
+    asiento="G17-A$(printf '%02d' "${asiento_num}")"
+    post_ticket "GENERAL" "${asiento}" "G17"
+    g17_ok=$((g17_ok + 1))
+done
 
-GEN_INS=$(${PSQL} -tAc "SELECT COUNT(*) FROM tickets WHERE tipo='GENERAL' AND seccion IN ('G9','G10','G11','G12','G13','G14','G15','G16','G17') AND event_id='F1-2026-ESP';")
-echo "✓ Entradas GENERAL en G9..G17: ${GEN_INS}"
+echo "✓ Entradas GENERAL G17 enviadas a la API: ${g17_ok}"
 
 # -----------------------------------------------------------------------------
-# 4. Actualizar capacidad del evento
-# -----------------------------------------------------------------------------
-echo ""
-echo "→ Actualizando capacidad_total del evento..."
-
-${PSQL} <<'SQL'
-UPDATE events
-SET capacidad_total = (SELECT COUNT(*) FROM tickets WHERE event_id = 'F1-2026-ESP')
-WHERE id = 'F1-2026-ESP';
-SQL
-
-TOTAL=$(${PSQL} -tAc "SELECT capacidad_total FROM events WHERE id='F1-2026-ESP';")
-echo "✓ capacidad_total actualizada a ${TOTAL} entradas."
-
-# -----------------------------------------------------------------------------
-# 5. Resumen final
+# 4. Resumen final
 # -----------------------------------------------------------------------------
 echo ""
 echo "============================================================"
-echo " Resumen de tickets en 'F1-2026-ESP'"
-echo "============================================================"
-${PSQL} -c "
-SELECT
-    tipo,
-    COUNT(*)        AS total,
-    COUNT(*) FILTER (WHERE disponible)  AS disponibles,
-    COUNT(*) FILTER (WHERE NOT disponible) AS vendidas
-FROM tickets
-WHERE event_id = 'F1-2026-ESP'
-GROUP BY tipo
-ORDER BY tipo;
-"
+echo " Resumen de carga (vía API)"
+echo "   VIP       enviados : ${vip_ok}"
+echo "   GENERAL   enviados : $((gen_ok + g17_ok))"
+echo "   TOTAL     enviados : $((vip_ok + gen_ok + g17_ok))"
+echo ""
+echo " Disponibilidad actual:"
+curl -s "${BASE_URL}/api/tickets/availability" | \
+    (command -v jq >/dev/null 2>&1 \
+        && jq -r '.data[] | "   \(.tipo): \(.disponibles) disponibles"' \
+        || cat)
+echo ""
 echo "============================================================"
