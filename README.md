@@ -278,6 +278,27 @@ podman exec -it f1-tickets bash /scripts/simulate-purchases-wave3.sh
 
 All scripts are **idempotent** (`ON CONFLICT DO NOTHING`) and include a summary table at the end showing sold/available counts and total revenue.
 
+### Resetting purchases
+
+[`scripts/reset-purchases.sh`](scripts/reset-purchases.sh) wipes **all** purchases and brings the event back to zero — useful to restart a demo or simulation from scratch.
+
+```bash
+# Inside the container
+podman exec -it f1-tickets bash /scripts/reset-purchases.sh
+
+# From the host (with PostgreSQL accessible on localhost)
+PGSQL_USER=appuser PGSQL_PASSWORD=apppassword PGSQL_DB=appdb \
+  ./scripts/reset-purchases.sh
+```
+
+What it does in a single atomic transaction:
+1. Deletes all rows in `purchase_tickets`
+2. Deletes all rows in `purchases`
+3. Sets `tickets.disponible = TRUE` for every ticket
+4. Resets `events.entradas_vendidas = 0`
+
+The script prints a before/after summary table so you can confirm the state of the database.
+
 ### Continuous random simulation (external)
 
 [`scripts/simulate-purchases-random.sh`](scripts/simulate-purchases-random.sh) simulates purchases **from outside the container** by calling the REST API. It runs in an infinite loop until the event is sold out.
@@ -354,6 +375,7 @@ f1-sales-tickets/
 │   ├── simulate-purchases-wave2.sh      Simulate 450 more sales — 75% sold (manual, inside container)
 │   ├── simulate-purchases-wave3.sh      Simulate final 250 sales — SOLD OUT (manual, inside container)
 │   ├── simulate-purchases-random.sh     Continuous random simulation via REST API (external)
+│   ├── reset-purchases.sh               Reset all purchases to 0 (wipe + free tickets)
 │   ├── deploy.sh                        WildFly deployment helper
 │   └── sql/
 │       ├── 01-schema.sql                Database schema
