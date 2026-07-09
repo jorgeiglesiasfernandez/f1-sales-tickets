@@ -234,7 +234,8 @@ while true; do
 
     # Espera aleatoria
     wait_sec=$(_rand "${MIN_WAIT}" "${MAX_WAIT}")
-    wait_min=$(echo "scale=1; ${wait_sec}/60" | bc)
-    echo "   → Próxima compra en ${wait_sec}s (${wait_min} min)..."
+    wait_min=$(( wait_sec / 60 ))
+    wait_rem=$(( wait_sec % 60 ))
+    echo "   → Próxima compra en ${wait_sec}s (~${wait_min}m${wait_rem}s)..."
     sleep "${wait_sec}"
 done
