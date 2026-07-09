@@ -5,7 +5,7 @@
 # Uso:
 #   ./scripts/load-tickets.sh [BASE_URL]
 #
-#   BASE_URL por defecto: http://localhost:8080/f1-sales-tickets
+#   BASE_URL por defecto: http://localhost:8080/f1-tickets
 #
 # Añade:
 #   - 48  entradas VIP     (secciones V3..V4, 24 asientos cada una)
@@ -16,7 +16,24 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
-BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-sales-tickets}}"
+# ---------------------------------------------------------------------------
+# Detección de arquitectura/SO para seleccionar el generador de aleatorios:
+#   macOS (Darwin / arm64 o amd64) → jot -r
+#   Linux (amd64 / arm64 / cualquier) → shuf
+# ---------------------------------------------------------------------------
+_OS="$(uname -s)"
+_ARCH="$(uname -m)"
+
+_rand() {
+    local lo="$1" hi="$2"
+    if [ "${_OS}" = "Darwin" ]; then
+        jot -r 1 "${lo}" "${hi}"
+    else
+        shuf -i "${lo}-${hi}" -n 1
+    fi
+}
+
+BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-tickets}}"
 EVENT_ID="${EVENT_ID:-F1-2026-ESP}"
 TICKETS_URL="${BASE_URL}/api/tickets"
 

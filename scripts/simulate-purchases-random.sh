@@ -8,7 +8,7 @@
 #
 # Uso:
 #   ./scripts/simulate-purchases-random.sh [BASE_URL]
-#   BASE_URL por defecto: http://localhost:8080/f1-sales-tickets
+#   BASE_URL por defecto: http://localhost:8080/f1-tickets
 #
 # Variables de entorno opcionales:
 #   EVENT_ID     — ID del evento (por defecto: F1-2026-ESP)
@@ -19,10 +19,29 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
-BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-sales-tickets}}"
+# ---------------------------------------------------------------------------
+# Detección de arquitectura/SO para seleccionar el generador de aleatorios:
+#   macOS (Darwin / arm64 o amd64) → jot -r
+#   Linux (amd64 / arm64 / cualquier) → shuf
+# ---------------------------------------------------------------------------
+_OS="$(uname -s)"
+_ARCH="$(uname -m)"
+echo "→ Plataforma detectada: ${_OS} / ${_ARCH}"
+
+_rand() {
+    # _rand MIN MAX → entero aleatorio en [MIN, MAX]
+    local lo="$1" hi="$2"
+    if [ "${_OS}" = "Darwin" ]; then
+        jot -r 1 "${lo}" "${hi}"
+    else
+        shuf -i "${lo}-${hi}" -n 1
+    fi
+}
+
+BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-tickets}}"
 : "${EVENT_ID:=F1-2026-ESP}"
-: "${MIN_WAIT:=120}"
-: "${MAX_WAIT:=600}"
+: "${MIN_WAIT:=5}"
+: "${MAX_WAIT:=15}"
 : "${MIN_TICKETS:=1}"
 : "${MAX_TICKETS:=4}"
 
@@ -73,14 +92,46 @@ echo "========================================================================"
 echo ""
 
 # -----------------------------------------------------------------------------
+# Verificar que la API está accesible antes de empezar
+# -----------------------------------------------------------------------------
+echo "→ Verificando conexión con la API..."
+for intento in 1 2 3; do
+    http_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${EVENT_URL}" 2>/dev/null || echo "000")
+    if [ "${http_status}" = "200" ]; then
+        echo "✓ API accesible (HTTP ${http_status})"
+        break
+    fi
+    if [ "${intento}" -eq 3 ]; then
+        echo ""
+        echo "✗ No se puede conectar con la API en: ${BASE_URL}"
+        echo "  HTTP status: ${http_status}"
+        echo ""
+        echo "  ¿Está la aplicación en ejecución?"
+        echo "  Levántala con:  ./run-container.sh"
+        echo "  Luego vuelve a ejecutar este script, o pasa la URL como argumento:"
+        echo "    $0 <BASE_URL>"
+        echo ""
+        exit 1
+    fi
+    echo "  Intento ${intento}/3 fallido (HTTP ${http_status}), reintentando en 3s..."
+    sleep 3
+done
+echo ""
+
+# -----------------------------------------------------------------------------
 # Función: obtener entradas disponibles del evento vía API
-# Devuelve el número de entradas disponibles totales
+# Devuelve el número de entradas disponibles totales (entero, mínimo 0)
 # -----------------------------------------------------------------------------
 disponibles() {
-    curl -s "${EVENT_URL}" | \
-        (command -v jq >/dev/null 2>&1 \
-            && jq -r '.data.entradasDisponibles // 0' \
-            || grep -o '"entradasDisponibles":[0-9]*' | grep -o '[0-9]*$')
+    local resp
+    resp=$(curl -s "${EVENT_URL}")
+    local n
+    if command -v jq >/dev/null 2>&1; then
+        n=$(echo "${resp}" | jq -r '.data.entradasDisponibles // 0' 2>/dev/null)
+    else
+        n=$(echo "${resp}" | grep -o '"entradasDisponibles":[0-9]*' | grep -o '[0-9]*$')
+    fi
+    echo "${n:-0}"
 }
 
 # -----------------------------------------------------------------------------
@@ -93,10 +144,13 @@ realizar_compra() {
     local cantidad="$3"
     local tipo="$4"
     local email
+    # Normalización de nombre sin iconv (tr elimina tildes y ñ básicos)
     email="rnd.$(echo "${nombre}" | tr '[:upper:]' '[:lower:]' | \
-                  iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null | \
-                  tr ' ' '.' | tr -cd '[:alnum:].' ).${seq}@f1fans.com"
-    local telefono="6$(shuf -i 10000000-99999999 -n 1)"
+                  tr ' ' '.' | \
+                  tr 'áàäâéèëêíìïîóòöôúùüûñç' 'aaaaeeeeiiiioooouuuunc' | \
+                  tr -cd '[:alnum:].' ).${seq}@f1fans.com"
+    # jot puede devolver decimales en macOS → printf fuerza entero
+    local telefono="6$(printf '%d' "$(_rand 10000000 99999999)")"
 
     local body
     body=$(printf '{"eventId":"%s","nombreComprador":"%s","email":"%s","telefono":"%s","cantidadEntradas":%d,"tipoEntrada":"%s"}' \
@@ -139,7 +193,7 @@ while true; do
     fi
 
     # Seleccionar comprador aleatorio del pool
-    idx_comp=$(shuf -i 0-$(( NUM_COMPRADORES - 1 )) -n 1)
+    idx_comp=$(_rand 0 $(( NUM_COMPRADORES - 1 )))
     nombre="${NOMBRES[$idx_comp]}"
 
     # Cantidad aleatoria, sin superar las disponibles
@@ -147,10 +201,10 @@ while true; do
     if [ "${max_compra}" -lt "${MIN_TICKETS}" ]; then
         max_compra=${MIN_TICKETS}
     fi
-    cantidad=$(shuf -i "${MIN_TICKETS}-${max_compra}" -n 1)
+    cantidad=$(_rand "${MIN_TICKETS}" "${max_compra}")
 
     # Tipo aleatorio: 70% GENERAL, 30% VIP
-    rand_tipo=$(shuf -i 1-10 -n 1)
+    rand_tipo=$(_rand 1 10)
     if [ "${rand_tipo}" -le 7 ]; then
         tipo="GENERAL"
     else
@@ -179,7 +233,7 @@ while true; do
     fi
 
     # Espera aleatoria
-    wait_sec=$(shuf -i "${MIN_WAIT}-${MAX_WAIT}" -n 1)
+    wait_sec=$(_rand "${MIN_WAIT}" "${MAX_WAIT}")
     wait_min=$(echo "scale=1; ${wait_sec}/60" | bc)
     echo "   → Próxima compra en ${wait_sec}s (${wait_min} min)..."
     sleep "${wait_sec}"

@@ -133,11 +133,18 @@ public class PurchaseRestController {
                 purchase.agregarAsiento(ticket.getAsiento());
             }
             
-            // Confirmar la compra
-            purchase.confirmar();
-            
-            // Guardar en el repositorio
+            // Guardar en el repositorio (el repositorio genera el ID y llama a confirmar())
             Purchase savedPurchase = purchaseRepository.createPurchase(purchase);
+            
+            if (savedPurchase == null) {
+                // Revertir reserva de tickets si el INSERT falló
+                ticketRepository.releaseTickets(
+                    reservedTickets.stream().map(Ticket::getId).collect(Collectors.toList())
+                );
+                return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(ApiResponse.error("Error al guardar la compra en la base de datos"))
+                    .build();
+            }
             
             PurchaseDTO purchaseDTO = new PurchaseDTO(savedPurchase);
             return Response.status(Response.Status.CREATED)

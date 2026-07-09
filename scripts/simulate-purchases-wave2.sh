@@ -10,11 +10,28 @@
 #
 # Uso:
 #   ./scripts/simulate-purchases-wave2.sh [BASE_URL]
-#   BASE_URL por defecto: http://localhost:8080/f1-sales-tickets
+#   BASE_URL por defecto: http://localhost:8080/f1-tickets
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
-BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-sales-tickets}}"
+# ---------------------------------------------------------------------------
+# Detección de arquitectura/SO para seleccionar el generador de aleatorios:
+#   macOS (Darwin / arm64 o amd64) → jot -r
+#   Linux (amd64 / arm64 / cualquier) → shuf
+# ---------------------------------------------------------------------------
+_OS="$(uname -s)"
+_ARCH="$(uname -m)"
+
+_rand() {
+    local lo="$1" hi="$2"
+    if [ "${_OS}" = "Darwin" ]; then
+        jot -r 1 "${lo}" "${hi}"
+    else
+        shuf -i "${lo}-${hi}" -n 1
+    fi
+}
+
+BASE_URL="${1:-${API_BASE_URL:-http://localhost:8080/f1-tickets}}"
 PURCHASES_URL="${BASE_URL}/api/purchases"
 
 echo "============================================================"
@@ -22,6 +39,34 @@ echo " simulate-purchases-wave2.sh (vía API REST)"
 echo " Endpoint : ${PURCHASES_URL}"
 echo " Simulando ~450 ventas (400 GENERAL + 50 VIP)"
 echo "============================================================"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Verificar que la API está accesible antes de empezar
+# ---------------------------------------------------------------------------
+echo "→ Verificando conexión con la API..."
+for intento in 1 2 3; do
+    http_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${BASE_URL}/api/events/availability" 2>/dev/null || echo "000")
+    if [ "${http_status}" = "200" ]; then
+        echo "✓ API accesible (HTTP ${http_status})"
+        break
+    fi
+    if [ "${intento}" -eq 3 ]; then
+        echo ""
+        echo "✗ No se puede conectar con la API en: ${BASE_URL}"
+        echo "  HTTP status: ${http_status}"
+        echo ""
+        echo "  ¿Está la aplicación en ejecución?"
+        echo "  Levántala con:  ./run-container.sh"
+        echo "  Luego vuelve a ejecutar este script, o pasa la URL como argumento:"
+        echo "    $0 <BASE_URL>"
+        echo ""
+        exit 1
+    fi
+    echo "  Intento ${intento}/3 fallido (HTTP ${http_status}), reintentando en 3s..."
+    sleep 3
+done
+echo ""
 
 # ---------------------------------------------------------------------------
 # Función: crear una compra vía POST /api/purchases
