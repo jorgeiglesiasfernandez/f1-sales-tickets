@@ -1,0 +1,60 @@
+# ==============================================================================
+# compose.yml — Base de datos PostgreSQL 15 externa (local / dev)
+#
+# Compatible con Docker Compose y Podman Compose.
+# Podman detecta este fichero automáticamente como compose.yml.
+#
+# Uso:
+#   # Con Docker:
+#   docker compose up -d
+#   # Con Podman:
+#   podman compose up -d
+#
+#   # Restaurar el dump del legacy:
+#   ../scripts/03-restore-dump-container.sh ../dumps/f1-legacy-dump-YYYYMMDD-HHmmSS.sql
+#
+# Acceso:
+#   Host    : localhost
+#   Port    : 5433  (distinto del 5432 del legacy para evitar conflictos)
+#   User    : appuser
+#   Password: apppassword
+#   DB      : appdb
+#
+# Connection string:
+#   postgresql://appuser:apppassword@localhost:5433/appdb
+# ==============================================================================
+
+version: "3.9"
+
+services:
+  f1-external-db:
+    image: postgres:15-alpine
+    container_name: f1-external-db
+    restart: unless-stopped
+    ports:
+      # Puerto 5433 para no colisionar con el legacy en 5432 (si corre localmente)
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: appdb
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - f1-external-db-data:/var/lib/postgresql/data
+      - ./docker/init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels:
+      com.f1tickets.component: "external-database"
+      com.f1tickets.version: "15"
+      com.f1tickets.description: "Base de datos externa f1-tickets (migrada desde legacy)"
+
+volumes:
+  f1-external-db-data:
+    name: f1-external-db-data
+    labels:
+      com.f1tickets.component: "external-database"

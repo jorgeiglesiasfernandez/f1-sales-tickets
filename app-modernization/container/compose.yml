@@ -1,0 +1,56 @@
+# ==============================================================================
+# compose.yml — App modernizada (Liberty) + BD externa para desarrollo local
+#
+# Levanta la aplicación Liberty junto con la BD PostgreSQL externa.
+# Compatible con Docker Compose v2 y Podman Compose.
+#
+# Uso:
+#   docker compose up -d   (o podman compose up -d)
+#   docker compose down
+#
+# La app quedará disponible en: http://localhost:9080/f1-tickets
+# ==============================================================================
+services:
+  f1-liberty-app:
+    image: f1-liberty:latest
+    container_name: f1-liberty-app
+    ports:
+      - "9080:9080"
+      - "9443:9443"
+    environment:
+      - DB_HOST=f1-external-db
+      - DB_PORT=5432
+      - DB_NAME=appdb
+      - DB_USER=appuser
+      - DB_PASSWORD=apppassword
+    depends_on:
+      f1-external-db:
+        condition: service_healthy
+    networks:
+      - f1-net
+
+  f1-external-db:
+    image: docker.io/library/postgres:15-alpine
+    container_name: f1-external-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: appdb
+    volumes:
+      - f1-liberty-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - f1-net
+
+volumes:
+  f1-liberty-pgdata:
+
+networks:
+  f1-net:
+    driver: bridge
