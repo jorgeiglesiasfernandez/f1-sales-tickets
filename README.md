@@ -115,14 +115,56 @@ events ──< tickets
 
 Base path: `/f1-tickets/api`
 
+### Events
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/events` | List all events |
-| `GET` | `/events/{id}` | Get event by ID |
-| `GET` | `/tickets` | List all tickets |
-| `GET` | `/tickets/availability/{eventId}` | Ticket availability for an event |
-| `GET` | `/purchases` | List all purchases |
-| `POST` | `/purchases` | Create a new purchase |
+| `GET` | `/events` | Información del evento activo |
+| `GET` | `/events/{id}` | Evento por ID |
+| `GET` | `/events/availability` | Disponibilidad global del evento (capacidad, vendidas, % ocupación) |
+
+### Tickets
+
+| Method | Path | Query params | Description |
+|---|---|---|---|
+| `GET` | `/tickets/available` | `tipo` (GENERAL\|VIP), `limit` | Tickets disponibles (con filtro opcional de tipo) |
+| `GET` | `/tickets/availability` | — | Disponibilidad por tipo con precio |
+| `GET` | `/tickets/{id}` | — | Detalle de un ticket concreto |
+| `GET` | `/tickets/stats` | — | Estadísticas globales (capacidad, vendidos, % ocupación, disponibles por tipo) |
+| `POST` | `/tickets` | — | Crea un ticket de forma idempotente (`ON CONFLICT DO NOTHING`) |
+
+**Body `POST /tickets`:**
+```json
+{
+  "eventId":  "F1-2026-ESP",
+  "tipo":     "VIP",
+  "asiento":  "V3-A01",
+  "seccion":  "V3"
+}
+```
+
+### Purchases
+
+| Method | Path | Query params | Description |
+|---|---|---|---|
+| `POST` | `/purchases` | — | Crea una nueva compra (reserva tickets + actualiza contador) |
+| `GET` | `/purchases` | `email`, `estado`, `limit` (default 50) | Listado de compras con filtros opcionales |
+| `GET` | `/purchases/{id}` | — | Compra por ID |
+| `GET` | `/purchases/stats` | — | Estadísticas (total compras, ingresos, ventas por tipo, promedio de entradas) |
+
+**Body `POST /purchases`:**
+```json
+{
+  "eventId":         "F1-2026-ESP",
+  "nombreComprador": "Carlos Martínez",
+  "email":           "carlos@example.com",
+  "telefono":        "612345678",
+  "cantidadEntradas": 2,
+  "tipoEntrada":     "GENERAL"
+}
+```
+
+> Máximo 10 entradas por transacción. Devuelve `409 Conflict` si no hay stock suficiente.
 
 ---
 
@@ -236,6 +278,28 @@ podman exec -it f1-tickets bash /scripts/simulate-purchases-wave3.sh
 
 All scripts are **idempotent** (`ON CONFLICT DO NOTHING`) and include a summary table at the end showing sold/available counts and total revenue.
 
+### Continuous random simulation (external)
+
+[`scripts/simulate-purchases-random.sh`](scripts/simulate-purchases-random.sh) simulates purchases **from outside the container** by calling the REST API. It runs in an infinite loop until the event is sold out.
+
+```bash
+# Default target: http://localhost:8080/f1-tickets
+./scripts/simulate-purchases-random.sh
+
+# Custom target (e.g. OpenShift route)
+./scripts/simulate-purchases-random.sh https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+```
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `EVENT_ID` | `F1-2026-ESP` | Event ID to target |
+| `MIN_WAIT` | `120` | Minimum seconds between purchases |
+| `MAX_WAIT` | `600` | Maximum seconds between purchases |
+| `MIN_TICKETS` | `1` | Minimum tickets per purchase |
+| `MAX_TICKETS` | `4` | Maximum tickets per purchase |
+
+The script auto-detects the OS (`jot` on macOS, `shuf` on Linux) and picks from a pool of 100 named buyers. The ticket type split is 70% GENERAL / 30% VIP.
+
 ### Loading additional tickets
 
 [`scripts/load-tickets.sh`](scripts/load-tickets.sh) adds an extra batch of tickets beyond the original 1000:
@@ -276,6 +340,8 @@ f1-sales-tickets/
 ├── Dockerfile                        Multi-stage container build
 ├── pom.xml                           Maven project descriptor
 ├── run-container.sh                  Helper script — auto-detects podman/docker, manages lifecycle
+├── ama/
+│   └── f1-sales-tickets.war_migrationPlan.zip   IBM AMA migration plan (WildFly → Liberty)
 ├── config/
 │   ├── supervisord.conf              supervisord process definitions
 │   └── wildfly-ds.cli                WildFly CLI datasource configuration
@@ -285,8 +351,9 @@ f1-sales-tickets/
 │   ├── entrypoint.sh                    Container entrypoint
 │   ├── init-db.sh                       PostgreSQL initialisation script
 │   ├── load-tickets.sh                  Load extra tickets at runtime (manual)
-│   ├── simulate-purchases-wave2.sh      Simulate 450 more sales — 75% sold (manual)
-│   ├── simulate-purchases-wave3.sh      Simulate final 250 sales — SOLD OUT (manual)
+│   ├── simulate-purchases-wave2.sh      Simulate 450 more sales — 75% sold (manual, inside container)
+│   ├── simulate-purchases-wave3.sh      Simulate final 250 sales — SOLD OUT (manual, inside container)
+│   ├── simulate-purchases-random.sh     Continuous random simulation via REST API (external)
 │   ├── deploy.sh                        WildFly deployment helper
 │   └── sql/
 │       ├── 01-schema.sql                Database schema
