@@ -100,6 +100,7 @@ echo "→ [3/4] Construyendo imagen Liberty '${IMAGE_TAG}'..."
 echo "  Usando Containerfile en: ${PROJECT_DIR}/Containerfile"
 
 ${CTR} build \
+    --no-cache \
     -t "${IMAGE_TAG}" \
     -f "${PROJECT_DIR}/Containerfile" \
     "${PROJECT_DIR}"
