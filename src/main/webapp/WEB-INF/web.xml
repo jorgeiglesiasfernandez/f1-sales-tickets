@@ -10,6 +10,7 @@
     
     <welcome-file-list>
         <welcome-file>index.jsp</welcome-file>
+        <welcome-file>index.html</welcome-file>
     </welcome-file-list>
 
     <!-- Filtro de Struts 2 -->
@@ -22,7 +23,6 @@
         <filter-name>struts2</filter-name>
         <url-pattern>/*</url-pattern>
         <dispatcher>REQUEST</dispatcher>
-        <dispatcher>FORWARD</dispatcher>
     </filter-mapping>
 
     <!-- Configuración de sesión (30 minutos) -->

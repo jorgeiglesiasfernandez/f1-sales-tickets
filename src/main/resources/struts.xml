@@ -16,7 +16,12 @@
     <constant name="struts.action.excludePattern" value="/api/.*" />
     
     <package name="f1tickets" extends="struts-default">
-        
+
+        <!-- Acción raíz — redirige a dashboard cuando se accede a /f1-tickets/ -->
+        <action name="index">
+            <result type="redirect">dashboard</result>
+        </action>
+
         <!-- Dashboard Actions -->
         <action name="dashboard" class="com.ticketsales.action.DashboardAction">
             <result name="success">/WEB-INF/content/dashboard.jsp</result>
