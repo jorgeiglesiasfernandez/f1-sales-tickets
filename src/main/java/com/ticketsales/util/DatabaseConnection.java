@@ -10,11 +10,11 @@ import java.util.logging.Logger;
 
 /**
  * Clase utilitaria para gestionar conexiones a la base de datos PostgreSQL.
- * Utiliza el DataSource configurado en WildFly mediante JNDI.
+ * Utiliza el DataSource configurado en Liberty mediante JNDI.
  */
 public class DatabaseConnection {
     private static final Logger LOGGER = Logger.getLogger(DatabaseConnection.class.getName());
-    private static final String JNDI_NAME = "java:/jboss/datasources/AppDS";
+    private static final String JNDI_NAME = "java:comp/env/jdbc/AppDS";
     private static DataSource dataSource;
 
     // Inicialización estática del DataSource
