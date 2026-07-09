@@ -8,6 +8,9 @@
     <!-- Context root de la aplicación -->
     <context-root>/f1-tickets</context-root>
     
+    <!-- Configuración de seguridad (opcional) -->
+    <security-domain>other</security-domain>
+    
     <!-- Habilitar escaneo de anotaciones -->
     <enable-websockets>true</enable-websockets>
     
