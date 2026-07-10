@@ -1,26 +1,51 @@
 # ===========================================================================
+# Containerfile — f1-sales-tickets
+# Standard IBM AMA / OCI container build file (replaces Dockerfile)
+#
+# Multi-stage build:
+#   Stage 1 — Builder : maven:3.9-eclipse-temurin-8  (multi-arch, native)
+#   Stage 2 — Runtime : almalinux:8 + WildFly 18 + PostgreSQL 15 + supervisord
+#
+# TARGETARCH is injected automatically by BuildKit / Podman buildx:
+#   linux/amd64  → x86_64 PGDG repo
+#   linux/arm64  → aarch64 PGDG repo
+#
+# Build examples:
+#   podman build -f Containerfile -t f1-sales-tickets .
+#   docker build -f Containerfile -t f1-sales-tickets .
+#   podman build --platform linux/amd64,linux/arm64 --manifest f1-sales-tickets -f Containerfile .
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
 # Stage 1 — Builder: compiles the WAR with Maven
 # eclipse-temurin is a multi-arch image (amd64 + arm64) — the build always
 # runs on the native architecture of the node performing the build.
-# ===========================================================================
+# ---------------------------------------------------------------------------
 FROM docker.io/library/maven:3.9-eclipse-temurin-8 AS builder
 
 WORKDIR /build
 COPY pom.xml .
-# Download dependencies in a separate layer to leverage Docker cache
+# Download dependencies in a separate layer to leverage the build cache
 RUN mvn dependency:go-offline -q
 
 COPY src/ src/
 RUN mvn clean package -q -DskipTests
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # Stage 2 — Runtime: AlmaLinux 8 + PostgreSQL 15 + WildFly 18 + supervisord
 # TARGETARCH is injected automatically by BuildKit (amd64 / arm64)
-# ===========================================================================
+# ---------------------------------------------------------------------------
 FROM docker.io/library/almalinux:8
 
-LABEL maintainer="local-dev"
-LABEL description="Monolith AlmaLinux 8: WildFly 18 + PostgreSQL 15"
+# ---------------------------------------------------------------------------
+# OCI standard labels (required by IBM AMA)
+# ---------------------------------------------------------------------------
+LABEL org.opencontainers.image.title="f1-sales-tickets" \
+      org.opencontainers.image.description="Modernisation lab monolith: WildFly 18 + PostgreSQL 15 on AlmaLinux 8" \
+      org.opencontainers.image.vendor="IBM" \
+      org.opencontainers.image.source="https://github.com/jorgeiglesiasfernandez/f1-sales-tickets" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ARG TARGETARCH
 
@@ -134,5 +159,12 @@ COPY --from=builder /build/target/f1-sales-tickets.war \
 # 8080 → HTTP app  |  9990 → WildFly Admin  |  5432 → PostgreSQL (dev)
 # ---------------------------------------------------------------------------
 EXPOSE 8080 9990 5432
+
+# ---------------------------------------------------------------------------
+# Healthcheck — validates WildFly is serving requests before marking ready
+# --start-period covers PostgreSQL init + WildFly boot (up to 90 s)
+# ---------------------------------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -sf http://localhost:8080/f1-tickets || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

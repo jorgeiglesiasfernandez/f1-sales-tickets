@@ -107,7 +107,7 @@ events ──< tickets
 | JDBC driver | postgresql | 42.5.4 |
 | Process manager | supervisord | (pip3) |
 | Build tool | Maven | 3.9 |
-| Container build | Docker multi-stage | — |
+| Container build | Podman / Docker multi-stage | `Containerfile` (OCI/AMA) |
 
 ---
 
@@ -168,9 +168,9 @@ Base path: `/f1-tickets/api`
 
 ---
 
-## Multi-stage Docker Build
+## Multi-stage Container Build
 
-The [`Dockerfile`](Dockerfile) uses a two-stage build so no local Maven or JDK installation is required:
+The [`Containerfile`](Containerfile) follows the **IBM AMA / OCI standard** naming convention (`Containerfile` instead of `Dockerfile`) and uses a two-stage build so no local Maven or JDK installation is required:
 
 ```
 Stage 1 — builder (maven:3.9-eclipse-temurin-8)
@@ -183,30 +183,49 @@ Stage 2 — runtime (almalinux:8)
   └── Copy WAR from stage 1
 ```
 
-The image is **multi-architecture** (`amd64` + `arm64`) — the `TARGETARCH` build argument selects the correct PostgreSQL repository at build time. No separate Dockerfile is needed for Apple Silicon or ARM-based nodes.
+The image is **multi-architecture** (`amd64` + `arm64`) — the `TARGETARCH` build argument selects the correct PostgreSQL repository at build time. No separate Containerfile is needed for Apple Silicon or ARM-based nodes.
+
+### OCI Labels (IBM AMA required)
+
+The Containerfile includes standard OCI image labels:
+
+| Label | Value |
+|---|---|
+| `org.opencontainers.image.title` | `f1-sales-tickets` |
+| `org.opencontainers.image.vendor` | `IBM` |
+| `org.opencontainers.image.source` | GitHub repository URL |
+| `org.opencontainers.image.version` | `1.0.0` |
+| `org.opencontainers.image.licenses` | `Apache-2.0` |
 
 ---
 
 ## Running Locally
 
+[`run-container.sh`](run-container.sh) auto-detects **podman** or **docker** (podman takes priority) and the **native CPU architecture** (`arm64` / `amd64`), passing the correct `--platform` flag automatically. No manual configuration needed on Apple Silicon or x86_64.
+
 ### With the helper script (recommended)
 
-[`run-container.sh`](run-container.sh) auto-detects **podman** or **docker** (podman takes priority) and manages the full lifecycle:
-
 ```bash
-./run-container.sh           # build + run (default)
-./run-container.sh build     # build image only
-./run-container.sh run       # start container (create if needed)
-./run-container.sh stop      # stop the running container
-./run-container.sh logs      # follow container logs
-./run-container.sh destroy   # remove container and persistent volume
+./run-container.sh                # build + run (default)
+./run-container.sh build          # build image for native arch only
+./run-container.sh run            # start container (create if needed)
+./run-container.sh stop           # stop the running container
+./run-container.sh logs           # follow container logs
+./run-container.sh destroy        # remove container and persistent volume
+./run-container.sh multiarch-push # build amd64+arm64 manifest and push to registry
+                                  # requires: export IMAGE_REGISTRY=quay.io/myorg
 ```
 
 ### Manual commands
 
 ```bash
-# Build
-podman build -t f1-sales-tickets .   # or: docker build -t f1-sales-tickets .
+# Build for native architecture (podman or docker — both use Containerfile)
+podman build -f Containerfile -t f1-sales-tickets .
+docker build -f Containerfile -t f1-sales-tickets .
+
+# Build targeting a specific platform explicitly
+podman build --platform linux/arm64 -f Containerfile -t f1-sales-tickets .
+podman build --platform linux/amd64 -f Containerfile -t f1-sales-tickets .
 
 # Run (ephemeral — data is lost when the container is removed)
 podman run -d \
@@ -238,6 +257,26 @@ podman run -d \
 ```
 
 > The database is only initialised (schema + seed + wave 1 purchases) on the **first run**, when the volume is empty. Subsequent starts reuse the existing data.
+
+### Multi-arch publish (amd64 + arm64 in a single manifest)
+
+```bash
+# With podman
+IMAGE_REGISTRY=quay.io/myorg ./run-container.sh multiarch-push
+
+# Manually with podman
+podman build --platform linux/amd64,linux/arm64 \
+  --manifest quay.io/myorg/f1-sales-tickets:latest \
+  -f Containerfile .
+podman manifest push quay.io/myorg/f1-sales-tickets:latest \
+  docker://quay.io/myorg/f1-sales-tickets:latest
+
+# Manually with docker buildx
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f Containerfile \
+  -t quay.io/myorg/f1-sales-tickets:latest \
+  --push .
+```
 
 ### Access
 
@@ -358,7 +397,7 @@ supervisord (PID 1)       →    Native container process management
 
 ```
 f1-sales-tickets/
-├── Dockerfile                        Multi-stage container build
+├── Containerfile                     Multi-stage container build (IBM AMA / OCI standard)
 ├── pom.xml                           Maven project descriptor
 ├── run-container.sh                  Helper script — auto-detects podman/docker, manages lifecycle
 ├── ama/
@@ -391,7 +430,7 @@ f1-sales-tickets/
 
 ## OpenShift Deployment
 
-The [`ocp/deploy-all-in-one.yaml`](ocp/deploy-all-in-one.yaml) manifest deploys all required resources in a single file. It contains 11 resources applied in order:
+The [`ocp/deploy-all-in-one.yaml`](ocp/deploy-all-in-one.yaml) manifest deploys all required resources in a single file. It contains 11 resources applied in order. The `BuildConfig` uses `dockerfilePath: Containerfile` (OCI/IBM AMA standard naming).
 
 | # | Resource | Description |
 |---|---|---|
@@ -414,7 +453,7 @@ Before applying the manifest, replace the following placeholders:
 |---|---|---|
 | `<STORAGE_CLASSNAME>` | Storage class for the PVC | `crc-csi-hostpath-provisioner` (CRC) / `kubevirt-csi-infra-default` (OCP) |
 
-### Apply
+### Apply (CLI)
 
 ```bash
 # Requires kubeadmin session for cluster-scoped resources

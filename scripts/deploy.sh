@@ -2,6 +2,8 @@
 # ---------------------------------------------------------------------------
 # deploy.sh — Construye y despliega f1-sales-tickets.war en WildFly
 #
+# Auto-detecta el runtime de contenedor (podman tiene prioridad sobre docker).
+#
 # Uso:
 #   ./scripts/deploy.sh                     # build + deploy al contenedor activo
 #   ./scripts/deploy.sh --skip-build        # solo despliega (usa WAR ya existente)
@@ -11,10 +13,23 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Detectar runtime: podman tiene prioridad sobre docker
+# ---------------------------------------------------------------------------
+if command -v podman &>/dev/null; then
+    CTR="podman"
+elif command -v docker &>/dev/null; then
+    CTR="docker"
+else
+    echo "✗ Ni podman ni docker encontrados. Instala uno de ellos." >&2
+    exit 1
+fi
+echo "→ Runtime detectado: ${CTR}"
+
+# ---------------------------------------------------------------------------
 # Valores por defecto (sobreescribibles por argumentos o variables de entorno)
 # ---------------------------------------------------------------------------
 SKIP_BUILD=false
-CONTAINER_NAME="${CONTAINER_NAME:-almalinux8-dev}"
+CONTAINER_NAME="${CONTAINER_NAME:-f1-tickets}"
 WILDFLY_HOME="${WILDFLY_HOME:-/opt/wildfly}"
 WILDFLY_CLI="${WILDFLY_HOME}/bin/jboss-cli.sh"
 MGMT_HOST="${MGMT_HOST:-localhost}"
@@ -55,15 +70,15 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Verificar que el contenedor esté corriendo
 # ---------------------------------------------------------------------------
-CONTAINER_STATUS=$(podman inspect -f '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null || echo "missing")
+CONTAINER_STATUS=$(${CTR} inspect -f '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null || echo "missing")
 
 if [[ "${CONTAINER_STATUS}" == "missing" ]]; then
     echo "✗ El contenedor '${CONTAINER_NAME}' no existe."
-    echo "  Ejecútalo primero con:  ./run-podman.sh"
+    echo "  Ejecútalo primero con:  ./run-container.sh"
     exit 1
 elif [[ "${CONTAINER_STATUS}" != "running" ]]; then
     echo "▶ Contenedor '${CONTAINER_NAME}' detenido — arrancando..."
-    podman start "${CONTAINER_NAME}"
+    ${CTR} start "${CONTAINER_NAME}"
     echo "  Esperando a que WildFly esté listo..."
     sleep 20
 fi
@@ -72,10 +87,10 @@ fi
 # 3. Copiar el WAR al contenedor y desplegarlo vía CLI de WildFly
 # ---------------------------------------------------------------------------
 echo "▶ Copiando WAR al contenedor '${CONTAINER_NAME}'..."
-podman cp "${WAR_PATH}" "${CONTAINER_NAME}:/tmp/${APP_NAME}.war"
+${CTR} cp "${WAR_PATH}" "${CONTAINER_NAME}:/tmp/${APP_NAME}.war"
 
 echo "▶ Desplegando en WildFly (${MGMT_HOST}:${MGMT_PORT})..."
-podman exec "${CONTAINER_NAME}" \
+${CTR} exec "${CONTAINER_NAME}" \
     "${WILDFLY_CLI}" \
     --connect "controller=${MGMT_HOST}:${MGMT_PORT}" \
     --command="deploy /tmp/${APP_NAME}.war --force"
