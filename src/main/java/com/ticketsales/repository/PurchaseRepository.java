@@ -557,12 +557,63 @@ public class PurchaseRepository {
     }
     
     /**
+     * Resetea todas las compras en una única transacción atómica:
+     *   1. Borra purchase_tickets (relaciones compra-ticket)
+     *   2. Borra purchases (todas las compras)
+     *   3. Libera todos los tickets (disponible = TRUE)
+     *   4. Resetea entradas_vendidas = 0 en el evento
+     *
+     * @return mapa con contadores de filas afectadas por operación
+     */
+    public synchronized java.util.Map<String, Integer> resetAll() {
+        Connection conn = null;
+        java.util.Map<String, Integer> result = new java.util.LinkedHashMap<>();
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            try (Statement stmt = conn.createStatement()) {
+                result.put("purchaseTicketsDeleted",
+                    stmt.executeUpdate("DELETE FROM purchase_tickets"));
+                result.put("purchasesDeleted",
+                    stmt.executeUpdate("DELETE FROM purchases"));
+                result.put("ticketsReleased",
+                    stmt.executeUpdate(
+                        "UPDATE tickets SET disponible = TRUE WHERE disponible = FALSE"));
+                result.put("eventCounterReset",
+                    stmt.executeUpdate(
+                        "UPDATE events SET entradas_vendidas = 0 WHERE id = '" + EVENT_ID + "'"));
+            }
+
+            conn.commit();
+            LOGGER.info("Reset completo: " + result);
+            return result;
+
+        } catch (SQLException e) {
+            LOGGER.log(Level.SEVERE, "Error al ejecutar resetAll", e);
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException ex) {
+                    LOGGER.log(Level.SEVERE, "Error en rollback de resetAll", ex);
+                }
+            }
+            throw new RuntimeException("Error al resetear compras: " + e.getMessage(), e);
+        } finally {
+            if (conn != null) {
+                try { conn.setAutoCommit(true); conn.close(); }
+                catch (SQLException e) {
+                    LOGGER.log(Level.WARNING, "Error al cerrar conexión en resetAll", e);
+                }
+            }
+        }
+    }
+
+    /**
      * Genera un ID único para la compra
      */
     private String generatePurchaseId() {
         return "PUR-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
-    
+
     /**
      * Mapea un ResultSet a un objeto Purchase
      */

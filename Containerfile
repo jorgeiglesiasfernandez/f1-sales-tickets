@@ -148,6 +148,7 @@ COPY scripts/simulation/load-tickets.sh              /scripts/simulation/load-ti
 COPY scripts/simulation/simulate-purchases-wave2.sh  /scripts/simulation/simulate-purchases-wave2.sh
 COPY scripts/simulation/simulate-purchases-wave3.sh  /scripts/simulation/simulate-purchases-wave3.sh
 COPY scripts/simulation/simulate-purchases-random.sh /scripts/simulation/simulate-purchases-random.sh
+COPY scripts/simulation/reset-demo.sh                /scripts/simulation/reset-demo.sh
 
 RUN chmod +x \
         /docker-entrypoint-initdb.d/init-db.sh \
@@ -156,7 +157,8 @@ RUN chmod +x \
         /scripts/simulation/load-tickets.sh \
         /scripts/simulation/simulate-purchases-wave2.sh \
         /scripts/simulation/simulate-purchases-wave3.sh \
-        /scripts/simulation/simulate-purchases-random.sh
+        /scripts/simulation/simulate-purchases-random.sh \
+        /scripts/simulation/reset-demo.sh
 
 # ---------------------------------------------------------------------------
 # 6. Application — WAR built in the builder stage

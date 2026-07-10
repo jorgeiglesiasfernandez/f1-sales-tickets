@@ -219,6 +219,40 @@ public class PurchaseRestController {
     }
     
     /**
+     * DELETE /api/purchases
+     * Resetea todas las compras y devuelve el estado al inicio del demo.
+     *
+     * Ejecuta en una única transacción atómica:
+     *   1. Borra purchase_tickets
+     *   2. Borra purchases
+     *   3. Libera todos los tickets (disponible = TRUE)
+     *   4. Resetea events.entradas_vendidas = 0
+     *
+     * Respuesta 200 con resumen de filas afectadas:
+     * {
+     *   "success": true,
+     *   "message": "Reset completado",
+     *   "data": {
+     *     "purchaseTicketsDeleted": 120,
+     *     "purchasesDeleted": 60,
+     *     "ticketsReleased": 300,
+     *     "eventCounterReset": 1
+     *   }
+     * }
+     */
+    @DELETE
+    public Response resetPurchases() {
+        try {
+            java.util.Map<String, Integer> result = purchaseRepository.resetAll();
+            return Response.ok(ApiResponse.success("Reset completado. Todas las compras han sido eliminadas y los tickets liberados.", result)).build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity(ApiResponse.error("Error al resetear compras: " + e.getMessage()))
+                .build();
+        }
+    }
+
+    /**
      * GET /api/purchases/stats
      * Obtiene estadísticas de compras
      */
