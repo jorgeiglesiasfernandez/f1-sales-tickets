@@ -32,29 +32,33 @@ It is particularly suited for practising:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    Container                        │
-│                                                     │
-│  ┌──────────────┐        ┌──────────────────────┐  │
-│  │  supervisord │        │     WildFly 18        │  │
-│  │  (PID 1)     │───────▶│  :8080  HTTP          │  │
-│  │              │        │  :9990  Admin         │  │
-│  │              │        │                       │  │
-│  │              │        │  f1-sales-tickets.war │  │
-│  │              │        │  ├── Struts 2 (UI)    │  │
-│  │              │        │  ├── JAX-RS (REST API)│  │
-│  │              │        │  └── JDBC → AppDS     │  │
-│  │              │        └──────────┬────────────┘  │
-│  │              │                   │ JNDI DataSource│
-│  │              │        ┌──────────▼────────────┐  │
-│  │              │───────▶│   PostgreSQL 15        │  │
-│  └──────────────┘        │   :5432               │  │
-│                          └──────────┬────────────┘  │
-└─────────────────────────────────────┼───────────────┘
-                                      │
-                             PersistentVolume
-                          /var/lib/pgsql/15/data
+```mermaid
+graph TD
+    subgraph Container["🐳 Container"]
+        supervisord["supervisord\n(PID 1)"]
+        subgraph WildFly["WildFly 18"]
+            http[":8080 HTTP"]
+            admin[":9990 Admin"]
+            war["f1-sales-tickets.war"]
+            struts["Struts 2 (UI)"]
+            jaxrs["JAX-RS REST API"]
+            jdbc["JDBC → AppDS"]
+        end
+        subgraph PostgreSQL["PostgreSQL 15"]
+            pg[":5432"]
+            pgdata["/var/lib/pgsql/15/data"]
+        end
+    end
+
+    PV["💾 PersistentVolume"]
+
+    supervisord -->|starts| WildFly
+    supervisord -->|starts| PostgreSQL
+    war --> struts
+    war --> jaxrs
+    war --> jdbc
+    jdbc -->|JNDI DataSource| pg
+    pgdata --- PV
 ```
 
 ### Layers inside the WAR
@@ -78,10 +82,43 @@ com.ticketsales
 
 ### Data model
 
-```
-events ──< tickets
-  │
-  └──< purchases ──< purchase_tickets >── tickets
+```mermaid
+erDiagram
+    events {
+        string id PK
+        string nombre
+        date   fecha
+        string circuito
+        int    capacidad_total
+        int    entradas_vendidas
+    }
+    tickets {
+        string  id PK
+        string  event_id FK
+        string  tipo
+        decimal precio
+        string  asiento
+        string  seccion
+        boolean disponible
+    }
+    purchases {
+        string  id PK
+        string  event_id FK
+        string  nombre_comprador
+        string  email
+        int     cantidad_entradas
+        string  tipo_entrada
+        string  estado
+    }
+    purchase_tickets {
+        string purchase_id FK
+        string ticket_id FK
+    }
+
+    events    ||--o{ tickets          : "has"
+    events    ||--o{ purchases        : "has"
+    purchases ||--o{ purchase_tickets : "links"
+    tickets   ||--o{ purchase_tickets : "linked by"
 ```
 
 | Table | Description |
@@ -392,20 +429,21 @@ podman exec -it f1-tickets bash /scripts/simulation/load-tickets.sh
 
 ### Typical demo flow
 
-```
-1. Start              ./deploy/local/run.sh
-                      (auto-boot: schema + seed + wave 1 → 300 sold)
+```mermaid
+flowchart LR
+    Start(["▶ Start\ndeploy/local/run.sh"])
+    Boot["Auto-boot\nschema + seed + wave1\n300 / 1000 sold"]
+    UI["Web UI\nlocalhost:8080/f1-tickets"]
+    Wave2["simulate-purchases-wave2.sh\n750 / 1000 sold"]
+    Wave3["simulate-purchases-wave3.sh\n1000 / 1000 SOLD OUT"]
+    Reset["reset-demo.sh\n0 / 1000"]
+    Random["simulate-purchases-random.sh\ncontinuous loop"]
 
-2. Show UI            http://localhost:8080/f1-tickets
-
-3. Simulate sales     ./scripts/simulation/simulate-purchases-wave2.sh   → 750/1000
-                      ./scripts/simulation/simulate-purchases-wave3.sh   → SOLD OUT
-
-4. Reset for next     ./scripts/simulation/reset-demo.sh                 → 0/1000
-   demo run
-
-5. Or continuous      ./scripts/simulation/simulate-purchases-random.sh
-   random sales
+    Start --> Boot --> UI --> Wave2 --> Wave3
+    Wave3 --> Reset
+    Reset -->|"new demo run"| Wave2
+    UI -.->|"or continuous"| Random
+    Random -.->|"sold out → stop"| Wave3
 ```
 
 ---
@@ -569,12 +607,20 @@ The `BuildConfig` is configured with a **Generic Webhook** trigger. Every `git p
 
 ### Flow
 
-```
-git push main
-    └─▶ GitHub Webhook (POST)
-            └─▶ OCP BuildConfig (Containerfile strategy)
-                    └─▶ ImageStream f1-tickets:latest
-                            └─▶ Deployment rollout (automatic via image trigger)
+```mermaid
+sequenceDiagram
+    participant Dev  as Developer
+    participant GH   as GitHub
+    participant OCP  as OCP BuildConfig
+    participant IS   as ImageStream
+    participant DEP  as Deployment
+
+    Dev->>GH: git push main
+    GH->>OCP: Webhook POST (secret: f1ocp2026)
+    OCP->>OCP: docker build --file Containerfile
+    OCP->>IS: push f1-tickets:latest
+    IS-->>DEP: image trigger
+    DEP->>DEP: rolling rollout
 ```
 
 ### Webhook URL structure
