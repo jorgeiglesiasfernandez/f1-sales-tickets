@@ -6,18 +6,20 @@
 # Aplica los manifests de deploy/ocp/manifests/ en orden numérico.
 #
 # Uso:
-#   ./deploy/ocp/deploy.sh apply     — aplica todos los manifests + lanza 1er build
-#   ./deploy/ocp/deploy.sh build     — lanza un build manualmente
-#   ./deploy/ocp/deploy.sh status    — estado: pods, builds, ruta
-#   ./deploy/ocp/deploy.sh logs      — sigue los logs del pod en ejecución
-#   ./deploy/ocp/deploy.sh rollout   — fuerza redeploy sin nuevo build
-#   ./deploy/ocp/deploy.sh destroy   — elimina el namespace completo
-#   ./deploy/ocp/deploy.sh webhook   — muestra la URL del webhook de GitHub
+#   ./deploy/ocp/deploy.sh apply        — aplica todos los manifests + lanza 1er build
+#   ./deploy/ocp/deploy.sh build        — lanza un build completo de imagen en OCP
+#   ./deploy/ocp/deploy.sh hotdeploy    — mvn clean package + copia WAR al pod sin rebuild de imagen
+#   ./deploy/ocp/deploy.sh status       — estado: pods, builds, ruta
+#   ./deploy/ocp/deploy.sh logs         — sigue los logs del pod en ejecución
+#   ./deploy/ocp/deploy.sh rollout      — fuerza redeploy sin nuevo build
+#   ./deploy/ocp/deploy.sh destroy      — elimina el namespace completo
+#   ./deploy/ocp/deploy.sh webhook      — muestra la URL del webhook de GitHub
 #
 # Prerrequisitos:
 #   · oc CLI instalado y sesión activa (oc login ...)
 #   · kubeadmin para 'apply' y 'destroy' (ClusterRoleBindings)
 #   · Reemplazar <STORAGE_CLASSNAME> en manifests/02-storage.yaml antes de 'apply'
+#   · hotdeploy requiere además: Maven instalado en el host (mvn en PATH)
 # ==============================================================================
 set -euo pipefail
 
@@ -185,28 +187,94 @@ cmd_webhook() {
 }
 
 # ------------------------------------------------------------------------------
+# hotdeploy — compila el WAR con Maven en local y lo copia directamente al pod
+# en ejecución, desplegándolo en WildFly sin reconstruir la imagen OCI.
+#
+# Flujo:
+#   1. mvn clean package -DskipTests  → genera target/f1-sales-tickets.war
+#   2. oc cp WAR al pod               → /tmp/f1-sales-tickets.war
+#   3. oc exec jboss-cli deploy --force → hot-redeploy en WildFly (sin reinicio)
+#
+# Requiere:
+#   · Maven instalado en el host (mvn en PATH)
+#   · Pod f1-tickets en estado Running  (./deploy/ocp/deploy.sh status)
+#   · Sesión oc activa con acceso al namespace f1-tickets
+# ------------------------------------------------------------------------------
+cmd_hotdeploy() {
+    check_oc
+
+    local APP_NAME="f1-sales-tickets"
+    local WILDFLY_CLI="/opt/wildfly/bin/jboss-cli.sh"
+    # Raíz del proyecto: dos niveles arriba de deploy/ocp/
+    local PROJECT_ROOT
+    PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    local WAR_PATH="${PROJECT_ROOT}/target/${APP_NAME}.war"
+
+    # Verificar Maven
+    if ! command -v mvn &>/dev/null; then
+        echo "✗ Maven no encontrado en PATH. Instala mvn para usar hotdeploy." >&2
+        exit 1
+    fi
+
+    echo "▶ Compilando WAR con Maven..."
+    (cd "${PROJECT_ROOT}" && mvn clean package -q -DskipTests)
+    echo "✓ Build completado: ${WAR_PATH}"
+
+    # Obtener el nombre del pod en Running
+    local POD
+    POD=$(oc get pods -n "${NAMESPACE}" \
+        -l "app=${APP}" \
+        --field-selector=status.phase=Running \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+
+    if [[ -z "${POD}" ]]; then
+        echo "✗ No hay pod '${APP}' en estado Running en el namespace '${NAMESPACE}'." >&2
+        echo "  Comprueba el estado con: ./deploy/ocp/deploy.sh status" >&2
+        exit 1
+    fi
+
+    echo "→ Pod destino: ${POD}"
+
+    echo "▶ Copiando WAR al pod..."
+    oc cp "${WAR_PATH}" "${NAMESPACE}/${POD}:/tmp/${APP_NAME}.war"
+
+    echo "▶ Desplegando en WildFly (hot-deploy, sin reinicio del pod)..."
+    oc exec "${POD}" -n "${NAMESPACE}" -- \
+        "${WILDFLY_CLI}" --connect \
+        --command="deploy /tmp/${APP_NAME}.war --force"
+
+    echo ""
+    echo "✓ Hot-deploy completado en ${POD}."
+    ROUTE=$(oc get route "${APP}" -n "${NAMESPACE}" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    [[ -n "${ROUTE}" ]] && echo "  URL: https://${ROUTE}/f1-tickets"
+}
+
+# ------------------------------------------------------------------------------
 # Punto de entrada
 # ------------------------------------------------------------------------------
 case "${1:-}" in
-    apply)   cmd_apply ;;
-    build)   cmd_build ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs ;;
-    rollout) cmd_rollout ;;
-    destroy) cmd_destroy ;;
-    webhook) cmd_webhook ;;
+    apply)      cmd_apply ;;
+    build)      cmd_build ;;
+    hotdeploy)  cmd_hotdeploy ;;
+    status)     cmd_status ;;
+    logs)       cmd_logs ;;
+    rollout)    cmd_rollout ;;
+    destroy)    cmd_destroy ;;
+    webhook)    cmd_webhook ;;
     *)
         echo ""
         echo "Uso: $(basename "$0") <comando>"
         echo ""
         echo "Comandos:"
-        echo "  apply    — aplicar manifests + lanzar primer build"
-        echo "  build    — lanzar build manualmente"
-        echo "  status   — estado: pods, builds, ruta"
-        echo "  logs     — seguir logs del pod en ejecución"
-        echo "  rollout  — forzar redeploy sin nuevo build"
-        echo "  destroy  — eliminar namespace completo (pide confirmación)"
-        echo "  webhook  — mostrar URL del webhook de GitHub"
+        echo "  apply      — aplicar manifests + lanzar primer build"
+        echo "  build      — lanzar build completo de imagen en OCP"
+        echo "  hotdeploy  — mvn clean package + deploy WAR en el pod (sin rebuild de imagen)"
+        echo "  status     — estado: pods, builds, ruta"
+        echo "  logs       — seguir logs del pod en ejecución"
+        echo "  rollout    — forzar redeploy sin nuevo build"
+        echo "  destroy    — eliminar namespace completo (pide confirmación)"
+        echo "  webhook    — mostrar URL del webhook de GitHub"
         echo ""
         exit 1
         ;;

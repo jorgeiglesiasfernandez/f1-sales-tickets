@@ -8,14 +8,15 @@
 #   · Arquitectura — arm64 (Apple Silicon / ARM) o amd64 (x86_64)
 #
 # Uso:
-#   ./run-container.sh                  — build + run (default)
-#   ./run-container.sh build            — construir imagen nativa
-#   ./run-container.sh run              — arrancar contenedor (crea si no existe)
-#   ./run-container.sh stop             — detener contenedor
-#   ./run-container.sh destroy          — borrar contenedor y volumen persistente
-#   ./run-container.sh logs             — seguir logs en tiempo real
-#   ./run-container.sh multiarch-push   — construir manifest multi-arch y publicar
-#                                         (requiere IMAGE_REGISTRY definido)
+#   ./deploy/local/run.sh                  — build + run (default)
+#   ./deploy/local/run.sh build            — construir imagen nativa
+#   ./deploy/local/run.sh run              — arrancar contenedor (crea si no existe)
+#   ./deploy/local/run.sh stop             — detener contenedor
+#   ./deploy/local/run.sh destroy          — borrar contenedor y volumen persistente
+#   ./deploy/local/run.sh logs             — seguir logs en tiempo real
+#   ./deploy/local/run.sh hotdeploy        — mvn clean package + deploy WAR en WildFly sin reconstruir imagen
+#   ./deploy/local/run.sh multiarch-push   — construir manifest multi-arch y publicar
+#                                           (requiere IMAGE_REGISTRY definido)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -157,6 +158,54 @@ multiarch_push() {
 }
 
 # ---------------------------------------------------------------------------
+# hotdeploy — compila el WAR con Maven y lo despliega en el WildFly del
+# contenedor ya en ejecución, sin reconstruir la imagen.
+#
+# Flujo:
+#   1. mvn clean package -DskipTests  → genera target/f1-sales-tickets.war
+#   2. Copia el WAR al contenedor     → /tmp/f1-sales-tickets.war
+#   3. jboss-cli deploy --force       → hot-redeploy en WildFly (sin reinicio)
+#
+# Requiere:
+#   · Maven instalado en el host (mvn en PATH)
+#   · Contenedor f1-tickets en ejecución  (./deploy/local/run.sh run)
+#   · Puerto 9990 accesible (se mapea en run)
+# ---------------------------------------------------------------------------
+hotdeploy() {
+    local WAR_PATH="target/f1-sales-tickets.war"
+    local APP_NAME="f1-sales-tickets"
+    local WILDFLY_CLI="/opt/wildfly/bin/jboss-cli.sh"
+    # Raíz del proyecto: dos niveles arriba de deploy/local/
+    local PROJECT_ROOT
+    PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+    echo "▶ Compilando WAR con Maven..."
+    (cd "${PROJECT_ROOT}" && mvn clean package -q -DskipTests)
+    echo "✓ Build completado: ${PROJECT_ROOT}/${WAR_PATH}"
+
+    # Verificar que el contenedor está corriendo
+    if ! ${CTR} container inspect "${CONTAINER_NAME}" &>/dev/null || \
+       [[ "$(${CTR} inspect -f '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null)" != "running" ]]; then
+        echo "✗ El contenedor '${CONTAINER_NAME}' no está en ejecución." >&2
+        echo "  Arráncalo primero con: ./deploy/local/run.sh run" >&2
+        exit 1
+    fi
+
+    echo "▶ Copiando WAR al contenedor '${CONTAINER_NAME}'..."
+    ${CTR} cp "${PROJECT_ROOT}/${WAR_PATH}" "${CONTAINER_NAME}:/tmp/${APP_NAME}.war"
+
+    echo "▶ Desplegando en WildFly (hot-deploy, sin reinicio)..."
+    ${CTR} exec "${CONTAINER_NAME}" \
+        "${WILDFLY_CLI}" --connect \
+        --command="deploy /tmp/${APP_NAME}.war --force"
+
+    echo ""
+    echo "✓ Hot-deploy completado."
+    echo "  Web UI  : http://localhost:8080/f1-tickets"
+    echo "  API     : http://localhost:8080/f1-tickets/api/events"
+}
+
+# ---------------------------------------------------------------------------
 # Punto de entrada
 # ---------------------------------------------------------------------------
 case "${1:-}" in
@@ -165,6 +214,7 @@ case "${1:-}" in
     stop)           stop ;;
     destroy)        destroy ;;
     logs)           logs ;;
+    hotdeploy)      hotdeploy ;;
     multiarch-push) multiarch_push ;;
     *)
         build
