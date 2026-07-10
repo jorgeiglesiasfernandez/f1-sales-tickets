@@ -136,7 +136,9 @@ public class PurchaseRepository {
                         "LEFT JOIN purchase_tickets pt ON p.id = pt.purchase_id " +
                         "LEFT JOIN tickets t ON pt.ticket_id = t.id " +
                         "WHERE p.id = ? " +
-                        "GROUP BY p.id";
+                        "GROUP BY p.id, p.event_id, p.nombre_comprador, p.email, p.telefono, " +
+                        "p.cantidad_entradas, p.tipo_entrada, p.precio_total, p.fecha_compra, " +
+                        "p.estado, p.codigo_confirmacion";
             
             stmt = conn.prepareStatement(sql);
             stmt.setString(1, id);
@@ -174,7 +176,9 @@ public class PurchaseRepository {
                         "FROM purchases p " +
                         "LEFT JOIN purchase_tickets pt ON p.id = pt.purchase_id " +
                         "LEFT JOIN tickets t ON pt.ticket_id = t.id " +
-                        "GROUP BY p.id " +
+                        "GROUP BY p.id, p.event_id, p.nombre_comprador, p.email, p.telefono, " +
+                        "p.cantidad_entradas, p.tipo_entrada, p.precio_total, p.fecha_compra, " +
+                        "p.estado, p.codigo_confirmacion " +
                         "ORDER BY p.fecha_compra DESC";
             
             stmt = conn.prepareStatement(sql);
@@ -213,7 +217,9 @@ public class PurchaseRepository {
                         "LEFT JOIN purchase_tickets pt ON p.id = pt.purchase_id " +
                         "LEFT JOIN tickets t ON pt.ticket_id = t.id " +
                         "WHERE p.email = ? " +
-                        "GROUP BY p.id " +
+                        "GROUP BY p.id, p.event_id, p.nombre_comprador, p.email, p.telefono, " +
+                        "p.cantidad_entradas, p.tipo_entrada, p.precio_total, p.fecha_compra, " +
+                        "p.estado, p.codigo_confirmacion " +
                         "ORDER BY p.fecha_compra DESC";
             
             stmt = conn.prepareStatement(sql);
@@ -253,7 +259,9 @@ public class PurchaseRepository {
                         "LEFT JOIN purchase_tickets pt ON p.id = pt.purchase_id " +
                         "LEFT JOIN tickets t ON pt.ticket_id = t.id " +
                         "WHERE p.estado = ? " +
-                        "GROUP BY p.id " +
+                        "GROUP BY p.id, p.event_id, p.nombre_comprador, p.email, p.telefono, " +
+                        "p.cantidad_entradas, p.tipo_entrada, p.precio_total, p.fecha_compra, " +
+                        "p.estado, p.codigo_confirmacion " +
                         "ORDER BY p.fecha_compra DESC";
             
             stmt = conn.prepareStatement(sql);
@@ -292,7 +300,9 @@ public class PurchaseRepository {
                         "FROM purchases p " +
                         "LEFT JOIN purchase_tickets pt ON p.id = pt.purchase_id " +
                         "LEFT JOIN tickets t ON pt.ticket_id = t.id " +
-                        "GROUP BY p.id " +
+                        "GROUP BY p.id, p.event_id, p.nombre_comprador, p.email, p.telefono, " +
+                        "p.cantidad_entradas, p.tipo_entrada, p.precio_total, p.fecha_compra, " +
+                        "p.estado, p.codigo_confirmacion " +
                         "ORDER BY p.fecha_compra DESC " +
                         "LIMIT ?";
             
