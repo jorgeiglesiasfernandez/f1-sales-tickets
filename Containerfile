@@ -123,30 +123,40 @@ RUN JDBC_JAR="postgresql-${PG_JDBC_VERSION}.jar" \
 EOF
 
 # ---------------------------------------------------------------------------
-# 5. supervisord config, init scripts and simulation scripts
+# 5. supervisord config, entrypoint, DB init scripts and simulation scripts
+#
+# scripts/db/        → DB bootstrap + manual DB management (inside container)
+# scripts/db/sql/    → SQL files: schema, seed, wave-1 purchases
+# scripts/simulation/→ manual simulation scripts (inside container)
 # ---------------------------------------------------------------------------
-COPY config/supervisord.conf          /etc/supervisord.conf
-COPY config/wildfly-ds.cli            /opt/wildfly-ds.cli
-COPY scripts/init-db.sh               /docker-entrypoint-initdb.d/init-db.sh
-COPY scripts/sql/01-schema.sql        /docker-entrypoint-initdb.d/01-schema.sql
-COPY scripts/sql/02-seed.sql          /docker-entrypoint-initdb.d/02-seed.sql
+COPY config/supervisord.conf                   /etc/supervisord.conf
+COPY config/wildfly-ds.cli                     /opt/wildfly-ds.cli
+COPY scripts/entrypoint.sh                     /entrypoint.sh
+
+# DB init — executed once on first boot by entrypoint.sh
+COPY scripts/db/init-db.sh                     /docker-entrypoint-initdb.d/init-db.sh
+COPY scripts/db/sql/01-schema.sql              /docker-entrypoint-initdb.d/01-schema.sql
+COPY scripts/db/sql/02-seed.sql                /docker-entrypoint-initdb.d/02-seed.sql
 # Wave 1 simulated purchases — applied automatically on first boot
-COPY scripts/sql/03-purchases-auto.sql /docker-entrypoint-initdb.d/03-purchases-auto.sql
-COPY scripts/entrypoint.sh            /entrypoint.sh
-# Manual simulation scripts — available inside the container under /scripts/
-COPY scripts/load-tickets.sh              /scripts/load-tickets.sh
-COPY scripts/simulate-purchases-wave2.sh  /scripts/simulate-purchases-wave2.sh
-COPY scripts/simulate-purchases-wave3.sh  /scripts/simulate-purchases-wave3.sh
-COPY scripts/simulate-purchases-random.sh /scripts/simulate-purchases-random.sh
-COPY scripts/reset-purchases.sh           /scripts/reset-purchases.sh
+COPY scripts/db/sql/03-purchases-auto.sql      /docker-entrypoint-initdb.d/03-purchases-auto.sql
+
+# Manual DB management — available inside the container under /scripts/db/
+COPY scripts/db/reset-purchases.sh             /scripts/db/reset-purchases.sh
+
+# Manual simulation scripts — available inside the container under /scripts/simulation/
+COPY scripts/simulation/load-tickets.sh              /scripts/simulation/load-tickets.sh
+COPY scripts/simulation/simulate-purchases-wave2.sh  /scripts/simulation/simulate-purchases-wave2.sh
+COPY scripts/simulation/simulate-purchases-wave3.sh  /scripts/simulation/simulate-purchases-wave3.sh
+COPY scripts/simulation/simulate-purchases-random.sh /scripts/simulation/simulate-purchases-random.sh
+
 RUN chmod +x \
         /docker-entrypoint-initdb.d/init-db.sh \
         /entrypoint.sh \
-        /scripts/load-tickets.sh \
-        /scripts/simulate-purchases-wave2.sh \
-        /scripts/simulate-purchases-wave3.sh \
-        /scripts/simulate-purchases-random.sh \
-        /scripts/reset-purchases.sh
+        /scripts/db/reset-purchases.sh \
+        /scripts/simulation/load-tickets.sh \
+        /scripts/simulation/simulate-purchases-wave2.sh \
+        /scripts/simulation/simulate-purchases-wave3.sh \
+        /scripts/simulation/simulate-purchases-random.sh
 
 # ---------------------------------------------------------------------------
 # 6. Application — WAR built in the builder stage

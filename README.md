@@ -290,15 +290,15 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## Seed Data & Purchase Simulation
 
-The database is automatically initialised on first start via [`scripts/init-db.sh`](scripts/init-db.sh).
+The database is automatically initialised on first start via [`scripts/db/init-db.sh`](scripts/db/init-db.sh).
 
 ### What runs automatically on first boot
 
 | Step | Script | Result |
 |---|---|---|
-| Schema | [`scripts/sql/01-schema.sql`](scripts/sql/01-schema.sql) | 4 tables + indexes created |
-| Seed | [`scripts/sql/02-seed.sql`](scripts/sql/02-seed.sql) | 1 event, 800 GENERAL + 200 VIP tickets |
-| Wave 1 | [`scripts/sql/03-purchases-auto.sql`](scripts/sql/03-purchases-auto.sql) | 300 tickets sold (250 GENERAL + 50 VIP), 60 purchases CONFIRMADA |
+| Schema | [`scripts/db/sql/01-schema.sql`](scripts/db/sql/01-schema.sql) | 4 tables + indexes created |
+| Seed | [`scripts/db/sql/02-seed.sql`](scripts/db/sql/02-seed.sql) | 1 event, 800 GENERAL + 200 VIP tickets |
+| Wave 1 | [`scripts/db/sql/03-purchases-auto.sql`](scripts/db/sql/03-purchases-auto.sql) | 300 tickets sold (250 GENERAL + 50 VIP), 60 purchases CONFIRMADA |
 
 ### Purchase simulation waves (manual)
 
@@ -307,27 +307,27 @@ Run these **inside the container** to progressively fill the event up to sold ou
 | Script | Sells | Running total | Status |
 |---|---|---|---|
 | *(auto on boot)* | 300 | 300 / 1000 | 30% sold |
-| [`simulate-purchases-wave2.sh`](scripts/simulate-purchases-wave2.sh) | 450 | 750 / 1000 | 75% sold |
-| [`simulate-purchases-wave3.sh`](scripts/simulate-purchases-wave3.sh) | 250 | 1000 / 1000 | **SOLD OUT** |
+| [`simulate-purchases-wave2.sh`](scripts/simulation/simulate-purchases-wave2.sh) | 450 | 750 / 1000 | 75% sold |
+| [`simulate-purchases-wave3.sh`](scripts/simulation/simulate-purchases-wave3.sh) | 250 | 1000 / 1000 | **SOLD OUT** |
 
 ```bash
-podman exec -it f1-tickets bash /scripts/simulate-purchases-wave2.sh
-podman exec -it f1-tickets bash /scripts/simulate-purchases-wave3.sh
+podman exec -it f1-tickets bash /scripts/simulation/simulate-purchases-wave2.sh
+podman exec -it f1-tickets bash /scripts/simulation/simulate-purchases-wave3.sh
 ```
 
 All scripts are **idempotent** (`ON CONFLICT DO NOTHING`) and include a summary table at the end showing sold/available counts and total revenue.
 
 ### Resetting purchases
 
-[`scripts/reset-purchases.sh`](scripts/reset-purchases.sh) wipes **all** purchases and brings the event back to zero — useful to restart a demo or simulation from scratch.
+[`scripts/db/reset-purchases.sh`](scripts/db/reset-purchases.sh) wipes **all** purchases and brings the event back to zero — useful to restart a demo or simulation from scratch.
 
 ```bash
 # Inside the container
-podman exec -it f1-tickets bash /scripts/reset-purchases.sh
+podman exec -it f1-tickets bash /scripts/db/reset-purchases.sh
 
 # From the host (with PostgreSQL accessible on localhost)
 PGSQL_USER=appuser PGSQL_PASSWORD=apppassword PGSQL_DB=appdb \
-  ./scripts/reset-purchases.sh
+  ./scripts/db/reset-purchases.sh
 ```
 
 What it does in a single atomic transaction:
@@ -340,14 +340,14 @@ The script prints a before/after summary table so you can confirm the state of t
 
 ### Continuous random simulation (external)
 
-[`scripts/simulate-purchases-random.sh`](scripts/simulate-purchases-random.sh) simulates purchases **from outside the container** by calling the REST API. It runs in an infinite loop until the event is sold out.
+[`scripts/simulation/simulate-purchases-random.sh`](scripts/simulation/simulate-purchases-random.sh) simulates purchases **from outside the container** by calling the REST API. It runs in an infinite loop until the event is sold out.
 
 ```bash
 # Default target: http://localhost:8080/f1-tickets
-./scripts/simulate-purchases-random.sh
+./scripts/simulation/simulate-purchases-random.sh
 
 # Custom target (e.g. OpenShift route)
-./scripts/simulate-purchases-random.sh https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+./scripts/simulation/simulate-purchases-random.sh https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
 ```
 
 | Environment variable | Default | Description |
@@ -362,7 +362,7 @@ The script auto-detects the OS (`jot` on macOS, `shuf` on Linux) and picks from 
 
 ### Loading additional tickets
 
-[`scripts/load-tickets.sh`](scripts/load-tickets.sh) adds an extra batch of tickets beyond the original 1000:
+[`scripts/simulation/load-tickets.sh`](scripts/simulation/load-tickets.sh) adds an extra batch of tickets beyond the original 1000:
 
 | Type | Qty | Sections | Price |
 |---|---|---|---|
@@ -370,7 +370,7 @@ The script auto-detects the OS (`jot` on macOS, `shuf` on Linux) and picks from 
 | GENERAL | 167 | G9–G16 (4 rows × 5 seats) + G17 row A (7 seats) | €150 |
 
 ```bash
-podman exec -it f1-tickets bash /scripts/load-tickets.sh
+podman exec -it f1-tickets bash /scripts/simulation/load-tickets.sh
 ```
 
 ---
@@ -408,18 +408,20 @@ f1-sales-tickets/
 ├── ocp/
 │   └── deploy-all-in-one.yaml        Full OpenShift deployment manifest (11 resources)
 ├── scripts/
-│   ├── entrypoint.sh                    Container entrypoint
-│   ├── init-db.sh                       PostgreSQL initialisation script
-│   ├── load-tickets.sh                  Load extra tickets at runtime (manual)
-│   ├── simulate-purchases-wave2.sh      Simulate 450 more sales — 75% sold (manual, inside container)
-│   ├── simulate-purchases-wave3.sh      Simulate final 250 sales — SOLD OUT (manual, inside container)
-│   ├── simulate-purchases-random.sh     Continuous random simulation via REST API (external)
-│   ├── reset-purchases.sh               Reset all purchases to 0 (wipe + free tickets)
-│   ├── deploy.sh                        WildFly deployment helper
-│   └── sql/
-│       ├── 01-schema.sql                Database schema
-│       ├── 02-seed.sql                  Initial data (1 event, 1000 tickets)
-│       └── 03-purchases-auto.sql        Wave 1 purchases — auto on first boot (300 sold)
+│   ├── entrypoint.sh                    Container entrypoint (PID 1 bootstrap)
+│   ├── deploy.sh                        WildFly deployment helper (host-side)
+│   ├── db/                              Database scripts
+│   │   ├── init-db.sh                   PostgreSQL init — user, schema, seed (auto on first boot)
+│   │   ├── reset-purchases.sh           Reset all purchases to 0 (wipe + free tickets)
+│   │   └── sql/
+│   │       ├── 01-schema.sql            Database schema (DDL)
+│   │       ├── 02-seed.sql              Initial data (1 event, 1000 tickets)
+│   │       └── 03-purchases-auto.sql    Wave 1 purchases — auto on first boot (300 sold)
+│   └── simulation/                      Simulation scripts (REST API calls)
+│       ├── load-tickets.sh              Load extra tickets at runtime (manual)
+│       ├── simulate-purchases-wave2.sh  Simulate 450 more sales — 75% sold (manual, inside container)
+│       ├── simulate-purchases-wave3.sh  Simulate final 250 sales — SOLD OUT (manual, inside container)
+│       └── simulate-purchases-random.sh Continuous random simulation via REST API (external)
 └── src/main/
     ├── java/com/ticketsales/        Application source code
     ├── resources/struts.xml         Struts 2 action mappings
