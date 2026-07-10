@@ -26,12 +26,14 @@ FROM icr.io/appcafe/websphere-liberty:25.0.0.6-kernel-java8-openj9-ubi
 ARG TLS=true
 
 
-RUN mkdir -p /opt/ibm/wlp/usr/shared/config/lib/global && \
-    mkdir -p /opt/ibm/wlp/usr/shared/resources/postgres && \
-    mkdir -p /scripts
-
-# Install PostgreSQL client (needed by reset-purchases.sh)
-RUN microdnf install -y postgresql && microdnf clean all
+# Install PostgreSQL client (needed by reset-purchases.sh) — run as root before USER switch
+USER root
+RUN microdnf install -y postgresql && microdnf clean all && \
+    mkdir -p /scripts && \
+    chmod 755 /scripts && \
+    mkdir -p /opt/ibm/wlp/usr/shared/config/lib/global && \
+    mkdir -p /opt/ibm/wlp/usr/shared/resources/postgres
+USER 1001
 
 # Download PostgreSQL JDBC driver into the directory expected by server.xml
 # ${shared.resource.dir} = /opt/ibm/wlp/usr/shared/resources/
@@ -53,9 +55,11 @@ RUN features.sh
 RUN configure.sh
 
 # Simulation and maintenance scripts — available inside the pod under /scripts/
+USER root
 COPY scripts/simulate-purchases-random.sh /scripts/simulate-purchases-random.sh
 COPY scripts/reset-purchases.sh           /scripts/reset-purchases.sh
 RUN chmod +x /scripts/simulate-purchases-random.sh /scripts/reset-purchases.sh
+USER 1001
 
 # Upgrade to production license if URL to JAR provided
 ARG LICENSE_JAR_URL
