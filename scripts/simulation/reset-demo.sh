@@ -84,11 +84,12 @@ echo ""
 # Ejecutar el reset
 # -----------------------------------------------------------------------------
 echo "→ Ejecutando reset (DELETE ${PURCHASES_URL})..."
-response=$(curl -s -w "\n%{http_code}" -X DELETE "${PURCHASES_URL}" \
+_tmp=$(mktemp)
+http_code=$(curl -s -o "${_tmp}" -w "%{http_code}" \
+    -X DELETE "${PURCHASES_URL}" \
     -H "Content-Type: application/json")
-
-body=$(echo "${response}" | head -n -1)
-http_code=$(echo "${response}" | tail -n 1)
+body=$(cat "${_tmp}")
+rm -f "${_tmp}"
 
 if [ "${http_code}" != "200" ]; then
     echo ""
