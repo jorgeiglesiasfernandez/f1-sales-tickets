@@ -14,32 +14,53 @@ import java.util.logging.Logger;
  */
 public class DatabaseConnection {
     private static final Logger LOGGER = Logger.getLogger(DatabaseConnection.class.getName());
-    private static final String JNDI_NAME = "java:comp/env/jdbc/AppDS";
-    private static DataSource dataSource;
 
-    // Inicialización estática del DataSource
-    static {
-        try {
-            Context ctx = new InitialContext();
-            dataSource = (DataSource) ctx.lookup(JNDI_NAME);
-            LOGGER.info("DataSource inicializado correctamente: " + JNDI_NAME);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error al inicializar DataSource: " + JNDI_NAME, e);
+    // Liberty registra el DataSource bajo el nombre corto del server.xml;
+    // la app lo resuelve vía resource-ref declarado en web.xml.
+    // Se prueban ambas rutas para cubrir entornos locales y OCP.
+    private static final String[] JNDI_CANDIDATES = {
+        "java:comp/env/jdbc/AppDS",
+        "jdbc/AppDS"
+    };
+
+    private static volatile DataSource dataSource;
+
+    /**
+     * Lookup lazy: se resuelve la primera vez que se pide una conexión,
+     * cuando Liberty ya ha completado el binding JNDI de la aplicación.
+     */
+    private static DataSource getDataSource() throws SQLException {
+        if (dataSource == null) {
+            synchronized (DatabaseConnection.class) {
+                if (dataSource == null) {
+                    for (String jndiName : JNDI_CANDIDATES) {
+                        try {
+                            Context ctx = new InitialContext();
+                            dataSource = (DataSource) ctx.lookup(jndiName);
+                            LOGGER.info("DataSource inicializado correctamente: " + jndiName);
+                            break;
+                        } catch (Exception e) {
+                            LOGGER.log(Level.WARNING, "JNDI lookup fallido para: " + jndiName, e);
+                        }
+                    }
+                    if (dataSource == null) {
+                        throw new SQLException(
+                            "DataSource no disponible. Comprueba la configuración JNDI en server.xml y web.xml.");
+                    }
+                }
+            }
         }
+        return dataSource;
     }
-    
+
     /**
      * Obtiene una conexión a la base de datos desde el pool de conexiones
-     * 
+     *
      * @return Connection objeto de conexión a la base de datos
      * @throws SQLException si hay un error al obtener la conexión
      */
     public static Connection getConnection() throws SQLException {
-        if (dataSource == null) {
-            throw new SQLException("DataSource no está inicializado");
-        }
-        
-        Connection conn = dataSource.getConnection();
+        Connection conn = getDataSource().getConnection();
         
         if (conn == null) {
             throw new SQLException("No se pudo obtener una conexión del DataSource");
