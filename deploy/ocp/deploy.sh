@@ -52,25 +52,38 @@ check_oc() {
 cmd_apply() {
     check_oc
 
-    # Verificar que no hay placeholder de storage class sin reemplazar
+    # Si el placeholder sigue sin reemplazar, preguntar interactivamente
     if grep -q '<STORAGE_CLASSNAME>' "${MANIFESTS_DIR}/02-storage.yaml"; then
         echo ""
-        echo "✗ Reemplaza <STORAGE_CLASSNAME> en manifests/02-storage.yaml antes de continuar."
-        echo "  Valores habituales:"
-        echo "    CRC / local : crc-csi-hostpath-provisioner"
-        echo "    OCP / HCP   : kubevirt-csi-infra-default"
+        echo "⚠  El manifest 02-storage.yaml contiene el placeholder <STORAGE_CLASSNAME>."
         echo ""
-        echo "  Ejemplo:"
-        echo "    sed -i 's/<STORAGE_CLASSNAME>/crc-csi-hostpath-provisioner/' \\"
-        echo "      ${MANIFESTS_DIR}/02-storage.yaml"
-        exit 1
+        echo "   StorageClasses disponibles en el cluster:"
+        oc get storageclass --no-headers -o custom-columns='NAME:.metadata.name,PROVISIONER:.provisioner,DEFAULT:.metadata.annotations.storageclass\.kubernetes\.io/is-default-class' \
+            2>/dev/null | awk '{printf "    %-45s %-40s %s\n", $1, $2, ($3=="true" ? "(default)" : "")}' || echo "   (no se pudo listar — continúa igualmente)"
+        echo ""
+        read -r -p "   Introduce el nombre de la StorageClass: " STORAGE_CLASS
+        if [[ -z "${STORAGE_CLASS}" ]]; then
+            echo "✗ No se introdujo ninguna StorageClass. Operación cancelada." >&2
+            exit 1
+        fi
+        echo "→ Aplicando StorageClass '${STORAGE_CLASS}' en 02-storage.yaml..."
+        sed "s/<STORAGE_CLASSNAME>/${STORAGE_CLASS}/g" \
+            "${MANIFESTS_DIR}/02-storage.yaml" > /tmp/02-storage-resolved.yaml
+        echo "✓ Placeholder reemplazado (el fichero original no se modifica)."
     fi
 
     echo ""
     echo "▶ Aplicando manifests en ${MANIFESTS_DIR}..."
     for manifest in "${MANIFESTS_DIR}"/0*.yaml; do
-        echo "  → $(basename "${manifest}")"
-        oc apply -f "${manifest}"
+        name="$(basename "${manifest}")"
+        echo "  → ${name}"
+        # Usar la versión resuelta de 02-storage si se generó en memoria
+        if [[ "${name}" == "02-storage.yaml" && -f /tmp/02-storage-resolved.yaml ]]; then
+            oc apply -f /tmp/02-storage-resolved.yaml
+            rm -f /tmp/02-storage-resolved.yaml
+        else
+            oc apply -f "${manifest}"
+        fi
     done
 
     echo ""
