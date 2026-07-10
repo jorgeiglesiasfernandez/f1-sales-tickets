@@ -26,7 +26,15 @@ FROM icr.io/appcafe/websphere-liberty:25.0.0.6-kernel-java8-openj9-ubi
 ARG TLS=true
 
 
-RUN mkdir -p /opt/ibm/wlp/usr/shared/config/lib/global
+RUN mkdir -p /opt/ibm/wlp/usr/shared/config/lib/global && \
+    mkdir -p /opt/ibm/wlp/usr/shared/resources/postgres
+
+# Download PostgreSQL JDBC driver into the directory expected by server.xml
+# ${shared.resource.dir} = /opt/ibm/wlp/usr/shared/resources/
+RUN curl -fsSL \
+    "https://jdbc.postgresql.org/download/postgresql-42.7.3.jar" \
+    -o /opt/ibm/wlp/usr/shared/resources/postgres/postgresql-42.7.3.jar
+
 COPY --chown=1001:0 --from=build-stage /config/ /config/
 COPY --chown=1001:0 --from=build-stage /sharedlibs/ /opt/ibm/wlp/usr/shared/config/lib/global
 
