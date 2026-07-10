@@ -181,13 +181,6 @@ spec:
         envFrom:
         - secretRef:
             name: f1-db-secret
-        resources:
-          requests:
-            cpu: "500m"
-            memory: "768Mi"
-          limits:
-            cpu: "2000m"
-            memory: "2Gi"
         volumeMounts:
         - name: pgsql-data
           mountPath: /var/lib/pgsql/15/data
