@@ -107,7 +107,7 @@ events ──< tickets
 | JDBC driver | postgresql | 42.5.4 |
 | Process manager | supervisord | (pip3) |
 | Build tool | Maven | 3.9 |
-| Container build | Podman / Docker multi-stage | `Containerfile` (OCI/AMA) |
+| Container build | Podman / Docker multi-stage | `Containerfile` (OCI standard) |
 
 ---
 
@@ -187,7 +187,7 @@ Base path: `/f1-tickets/api`
 
 ## Multi-stage Container Build
 
-The [`Containerfile`](Containerfile) follows the **IBM AMA / OCI standard** naming convention (`Containerfile` instead of `Dockerfile`) and uses a two-stage build so no local Maven or JDK installation is required:
+The [`Containerfile`](Containerfile) follows the **OCI standard** naming convention (`Containerfile` instead of `Dockerfile`) and uses a two-stage build so no local Maven or JDK installation is required:
 
 ```
 Stage 1 — builder (maven:3.9-eclipse-temurin-8)
@@ -202,7 +202,7 @@ Stage 2 — runtime (almalinux:8)
 
 The image is **multi-architecture** (`amd64` + `arm64`) — the `TARGETARCH` build argument selects the correct PostgreSQL repository at build time. No separate Containerfile is needed for Apple Silicon or ARM-based nodes.
 
-### OCI Labels (IBM AMA required)
+### OCI Labels
 
 | Label | Value |
 |---|---|
@@ -426,15 +426,13 @@ Single container          →    Separate app + db containers / services
 supervisord (PID 1)       →    Native container process management
 ```
 
-The `ama/` directory contains the **IBM AMA migration plan** (`f1-sales-tickets.war_migrationPlan.zip`) produced by IBM Application Modernization Accelerator, covering the WildFly → Open Liberty re-platforming path.
-
 ---
 
 ## Repository Structure
 
 ```
 f1-sales-tickets/
-├── Containerfile                          Multi-stage build (IBM AMA / OCI standard)
+├── Containerfile                          Multi-stage build (OCI standard)
 ├── pom.xml                                Maven project descriptor
 ├── README.md
 │
@@ -450,9 +448,6 @@ f1-sales-tickets/
 │           ├── 02-storage.yaml            PersistentVolumeClaim (replace <STORAGE_CLASSNAME>)
 │           ├── 03-build.yaml              ImageStream + BuildConfig (GitHub → Containerfile)
 │           └── 04-app.yaml               Deployment + Service + Route
-│
-├── ama/
-│   └── f1-sales-tickets.war_migrationPlan.zip   IBM AMA migration plan (WildFly → Liberty)
 │
 ├── config/                                Runtime config (copied into the container image)
 │   ├── supervisord.conf                   supervisord process definitions
