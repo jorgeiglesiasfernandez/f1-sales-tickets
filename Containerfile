@@ -27,7 +27,11 @@ ARG TLS=true
 
 
 RUN mkdir -p /opt/ibm/wlp/usr/shared/config/lib/global && \
-    mkdir -p /opt/ibm/wlp/usr/shared/resources/postgres
+    mkdir -p /opt/ibm/wlp/usr/shared/resources/postgres && \
+    mkdir -p /scripts
+
+# Install PostgreSQL client (needed by reset-purchases.sh)
+RUN microdnf install -y postgresql && microdnf clean all
 
 # Download PostgreSQL JDBC driver into the directory expected by server.xml
 # ${shared.resource.dir} = /opt/ibm/wlp/usr/shared/resources/
@@ -47,6 +51,11 @@ RUN features.sh
 
 # This script will add the requested server configurations, apply any interim fixes and populate caches to optimize runtime
 RUN configure.sh
+
+# Simulation and maintenance scripts — available inside the pod under /scripts/
+COPY scripts/simulate-purchases-random.sh /scripts/simulate-purchases-random.sh
+COPY scripts/reset-purchases.sh           /scripts/reset-purchases.sh
+RUN chmod +x /scripts/simulate-purchases-random.sh /scripts/reset-purchases.sh
 
 # Upgrade to production license if URL to JAR provided
 ARG LICENSE_JAR_URL
