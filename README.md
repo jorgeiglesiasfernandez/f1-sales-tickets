@@ -151,6 +151,7 @@ Base path: `/f1-tickets/api`
 | `GET` | `/purchases` | `email`, `estado`, `limit` (default 50) | Listado de compras con filtros opcionales |
 | `GET` | `/purchases/{id}` | — | Compra por ID |
 | `GET` | `/purchases/stats` | — | Estadísticas (total compras, ingresos, ventas por tipo, promedio de entradas) |
+| `DELETE` | `/purchases` | — | **Reset demo**: borra todas las compras y deja el evento a 0 vendidas |
 
 **Body `POST /purchases`:**
 ```json
@@ -165,6 +166,22 @@ Base path: `/f1-tickets/api`
 ```
 
 > Máximo 10 entradas por transacción. Devuelve `409 Conflict` si no hay stock suficiente.
+
+**Respuesta `DELETE /purchases`:**
+```json
+{
+  "success": true,
+  "message": "Reset completado. Todas las compras han sido eliminadas y los tickets liberados.",
+  "data": {
+    "purchaseTicketsDeleted": 120,
+    "purchasesDeleted": 60,
+    "ticketsReleased": 300,
+    "eventCounterReset": 1
+  }
+}
+```
+
+> El reset ejecuta en una única transacción atómica: borra `purchase_tickets`, borra `purchases`, libera todos los tickets (`disponible = TRUE`) y resetea `entradas_vendidas = 0`.
 
 ---
 
@@ -186,8 +203,6 @@ Stage 2 — runtime (almalinux:8)
 The image is **multi-architecture** (`amd64` + `arm64`) — the `TARGETARCH` build argument selects the correct PostgreSQL repository at build time. No separate Containerfile is needed for Apple Silicon or ARM-based nodes.
 
 ### OCI Labels (IBM AMA required)
-
-The Containerfile includes standard OCI image labels:
 
 | Label | Value |
 |---|---|
@@ -212,9 +227,21 @@ The Containerfile includes standard OCI image labels:
 ./deploy/local/run.sh stop           # stop the running container
 ./deploy/local/run.sh logs           # follow container logs
 ./deploy/local/run.sh destroy        # remove container and persistent volume
+./deploy/local/run.sh hotdeploy      # mvn clean package + deploy WAR without rebuilding image
 ./deploy/local/run.sh multiarch-push # build amd64+arm64 manifest and push to registry
                                      # requires: export IMAGE_REGISTRY=quay.io/myorg
 ```
+
+### Hot-deploy (without image rebuild)
+
+Compiles the WAR with Maven and deploys it directly into the running WildFly instance — no container image rebuild needed. Ideal for fast iterative development.
+
+```bash
+# Requires: mvn in PATH + container running
+./deploy/local/run.sh hotdeploy
+```
+
+Flow: `mvn clean package -DskipTests` → `podman/docker cp WAR` → `jboss-cli deploy --force`
 
 ### Manual commands
 
@@ -227,24 +254,8 @@ docker build -f Containerfile -t f1-sales-tickets .
 podman build --platform linux/arm64 -f Containerfile -t f1-sales-tickets .
 podman build --platform linux/amd64 -f Containerfile -t f1-sales-tickets .
 
-# Run (ephemeral — data is lost when the container is removed)
-podman run -d \
-  --name f1-tickets \
-  -p 8080:8080 \
-  -p 9990:9990 \
-  -e PGSQL_USER=appuser \
-  -e PGSQL_PASSWORD=apppassword \
-  -e PGSQL_DB=appdb \
-  f1-sales-tickets
-```
-
-For **persistent data** across container restarts, mount a named volume on the PostgreSQL data directory:
-
-```bash
-# Create the volume once
-podman volume create f1-tickets-pgdata
-
 # Run with persistent volume
+podman volume create f1-tickets-pgdata
 podman run -d \
   --name f1-tickets \
   -p 8080:8080 \
@@ -261,7 +272,7 @@ podman run -d \
 ### Multi-arch publish (amd64 + arm64 in a single manifest)
 
 ```bash
-# With podman
+# With the helper script
 IMAGE_REGISTRY=quay.io/myorg ./deploy/local/run.sh multiarch-push
 
 # Manually with podman
@@ -311,32 +322,37 @@ Run these **inside the container** to progressively fill the event up to sold ou
 | [`simulate-purchases-wave3.sh`](scripts/simulation/simulate-purchases-wave3.sh) | 250 | 1000 / 1000 | **SOLD OUT** |
 
 ```bash
+# Inside the container
 podman exec -it f1-tickets bash /scripts/simulation/simulate-purchases-wave2.sh
 podman exec -it f1-tickets bash /scripts/simulation/simulate-purchases-wave3.sh
+
+# Against OCP
+oc exec -it deployment/f1-tickets -n f1-tickets -- \
+  bash /scripts/simulation/simulate-purchases-wave2.sh
 ```
 
 All scripts are **idempotent** (`ON CONFLICT DO NOTHING`) and include a summary table at the end showing sold/available counts and total revenue.
 
-### Resetting purchases
+### Resetting the demo (via REST API)
 
-[`scripts/db/reset-purchases.sh`](scripts/db/reset-purchases.sh) wipes **all** purchases and brings the event back to zero — useful to restart a demo or simulation from scratch.
+[`scripts/simulation/reset-demo.sh`](scripts/simulation/reset-demo.sh) calls `DELETE /api/purchases` to wipe all purchases and restore the event to zero — **no direct database access required**. Works against local or OCP targets. Compatible with macOS and Linux.
 
 ```bash
-# Inside the container
-podman exec -it f1-tickets bash /scripts/db/reset-purchases.sh
+# Local
+./scripts/simulation/reset-demo.sh
 
-# From the host (with PostgreSQL accessible on localhost)
-PGSQL_USER=appuser PGSQL_PASSWORD=apppassword PGSQL_DB=appdb \
-  ./scripts/db/reset-purchases.sh
+# OCP
+./scripts/simulation/reset-demo.sh \
+  https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+
+# With environment variable
+API_BASE_URL=https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets \
+  ./scripts/simulation/reset-demo.sh
 ```
 
-What it does in a single atomic transaction:
-1. Deletes all rows in `purchase_tickets`
-2. Deletes all rows in `purchases`
-3. Sets `tickets.disponible = TRUE` for every ticket
-4. Resets `events.entradas_vendidas = 0`
+The script prints a before/after availability summary. After reset, the event is back at 0 sold / 1000 available and ready for a new demo run.
 
-The script prints a before/after summary table so you can confirm the state of the database.
+> **Direct DB reset (inside the container):** [`scripts/db/reset-purchases.sh`](scripts/db/reset-purchases.sh) performs the same operation via `psql` — useful when the app is not running or for debugging.
 
 ### Continuous random simulation (external)
 
@@ -347,7 +363,8 @@ The script prints a before/after summary table so you can confirm the state of t
 ./scripts/simulation/simulate-purchases-random.sh
 
 # Custom target (e.g. OpenShift route)
-./scripts/simulation/simulate-purchases-random.sh https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+./scripts/simulation/simulate-purchases-random.sh \
+  https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
 ```
 
 | Environment variable | Default | Description |
@@ -362,7 +379,7 @@ The script auto-detects the OS (`jot` on macOS, `shuf` on Linux) and picks from 
 
 ### Loading additional tickets
 
-[`scripts/simulation/load-tickets.sh`](scripts/simulation/load-tickets.sh) adds an extra batch of tickets beyond the original 1000:
+[`scripts/simulation/load-tickets.sh`](scripts/simulation/load-tickets.sh) adds an extra batch of tickets beyond the original 1000 via the REST API:
 
 | Type | Qty | Sections | Price |
 |---|---|---|---|
@@ -371,6 +388,24 @@ The script auto-detects the OS (`jot` on macOS, `shuf` on Linux) and picks from 
 
 ```bash
 podman exec -it f1-tickets bash /scripts/simulation/load-tickets.sh
+```
+
+### Typical demo flow
+
+```
+1. Start              ./deploy/local/run.sh
+                      (auto-boot: schema + seed + wave 1 → 300 sold)
+
+2. Show UI            http://localhost:8080/f1-tickets
+
+3. Simulate sales     ./scripts/simulation/simulate-purchases-wave2.sh   → 750/1000
+                      ./scripts/simulation/simulate-purchases-wave3.sh   → SOLD OUT
+
+4. Reset for next     ./scripts/simulation/reset-demo.sh                 → 0/1000
+   demo run
+
+5. Or continuous      ./scripts/simulation/simulate-purchases-random.sh
+   random sales
 ```
 
 ---
@@ -391,6 +426,8 @@ Single container          →    Separate app + db containers / services
 supervisord (PID 1)       →    Native container process management
 ```
 
+The `ama/` directory contains the **IBM AMA migration plan** (`f1-sales-tickets.war_migrationPlan.zip`) produced by IBM Application Modernization Accelerator, covering the WildFly → Open Liberty re-platforming path.
+
 ---
 
 ## Repository Structure
@@ -403,10 +440,10 @@ f1-sales-tickets/
 │
 ├── deploy/                                Build & deploy — entry point for all environments
 │   ├── local/
-│   │   └── run.sh                         Local lifecycle: build/run/stop/destroy/logs/multiarch-push
+│   │   └── run.sh                         Local: build/run/stop/destroy/logs/hotdeploy/multiarch-push
 │   └── ocp/
-│       ├── deploy.sh                      OCP CLI script: apply/build/status/logs/rollout/destroy/webhook
-│       ├── all-in-one.yaml                All resources in one file (web console / kubectl / GitOps)
+│       ├── deploy.sh                      OCP CLI: apply/build/hotdeploy/status/logs/rollout/destroy/webhook
+│       ├── all-in-one.yaml                All resources (web console / kubectl / GitOps)
 │       └── manifests/                     Individual manifests (apply selectively)
 │           ├── 00-project.yaml            ProjectRequest + ClusterRoleBindings (kubeadmin)
 │           ├── 01-secrets.yaml            Secret — PostgreSQL credentials
@@ -423,17 +460,18 @@ f1-sales-tickets/
 │
 ├── scripts/                               Scripts used inside the container
 │   ├── entrypoint.sh                      PID 1: init PostgreSQL + WildFly DS + supervisord
-│   ├── db/                                Database management scripts
+│   ├── db/                                Database management (direct psql access)
 │   │   ├── init-db.sh                     PostgreSQL init — user, schema, seed (auto on first boot)
-│   │   ├── reset-purchases.sh             Reset all purchases to 0 (wipe + free tickets)
+│   │   ├── reset-purchases.sh             Direct DB reset via psql (alternative to REST endpoint)
 │   │   └── sql/
 │   │       ├── 01-schema.sql              Database schema (DDL)
 │   │       ├── 02-seed.sql                Initial data (1 event, 1000 tickets)
 │   │       └── 03-purchases-auto.sql      Wave 1 purchases — auto on first boot (300 sold)
-│   └── simulation/                        Simulation scripts (REST API calls)
-│       ├── load-tickets.sh                Load extra tickets at runtime (manual)
-│       ├── simulate-purchases-wave2.sh    Simulate 450 more sales — 75% sold (manual, inside container)
-│       ├── simulate-purchases-wave3.sh    Simulate final 250 sales — SOLD OUT (manual, inside container)
+│   └── simulation/                        Simulation & demo scripts (REST API calls)
+│       ├── reset-demo.sh                  Reset all purchases via DELETE /api/purchases (macOS + Linux)
+│       ├── load-tickets.sh                Load extra tickets via POST /api/tickets
+│       ├── simulate-purchases-wave2.sh    Simulate 450 more sales → 75% sold
+│       ├── simulate-purchases-wave3.sh    Simulate final 250 sales → SOLD OUT
 │       └── simulate-purchases-random.sh   Continuous random simulation via REST API (external)
 │
 └── src/main/
@@ -464,7 +502,7 @@ Two deployment options are available under [`deploy/ocp/`](deploy/ocp/):
 | 4 | `Secret` | `01-secrets.yaml` | PostgreSQL credentials |
 | 5 | `PersistentVolumeClaim` | `02-storage.yaml` | 2 Gi volume for PostgreSQL data |
 | 6 | `ImageStream` | `03-build.yaml` | Target for the image built by the BuildConfig |
-| 7 | `BuildConfig` | `03-build.yaml` | Builds the image from GitHub; triggered by webhook on push |
+| 7 | `BuildConfig` | `03-build.yaml` | Builds from GitHub using `Containerfile`; triggered by webhook on push |
 | 8 | `Deployment` | `04-app.yaml` | Runs the WildFly 18 + PostgreSQL 15 monolith |
 | 9 | `Service` | `04-app.yaml` | Exposes port 8080 internally |
 | 10 | `Route` | `04-app.yaml` | Exposes the app externally with TLS edge termination |
@@ -482,33 +520,43 @@ Before applying, replace the storage class placeholder in [`deploy/ocp/manifests
 ```bash
 oc login https://<cluster>:6443 -u kubeadmin -p <pass>
 
-# Reemplazar storage class en el manifest
+# Replace storage class
 sed -i 's/<STORAGE_CLASSNAME>/crc-csi-hostpath-provisioner/' \
   deploy/ocp/manifests/02-storage.yaml
 
-# Aplicar todo + lanzar primer build + esperar rollout
+# Apply all resources + launch first build + wait for rollout
 ./deploy/ocp/deploy.sh apply
 
-# Comandos adicionales
-./deploy/ocp/deploy.sh status   # estado: pods, builds, ruta
-./deploy/ocp/deploy.sh logs     # seguir logs del pod
-./deploy/ocp/deploy.sh build    # lanzar build manualmente
-./deploy/ocp/deploy.sh rollout  # redeploy sin nuevo build
-./deploy/ocp/deploy.sh webhook  # URL del webhook para GitHub
-./deploy/ocp/deploy.sh destroy  # borrar todo (pide confirmación)
+# Additional commands
+./deploy/ocp/deploy.sh status     # pods, builds, route URL
+./deploy/ocp/deploy.sh logs       # follow pod logs
+./deploy/ocp/deploy.sh build      # trigger a new image build
+./deploy/ocp/deploy.sh hotdeploy  # mvn package + copy WAR to pod (no image rebuild)
+./deploy/ocp/deploy.sh rollout    # force redeploy without new build
+./deploy/ocp/deploy.sh webhook    # show GitHub webhook URL
+./deploy/ocp/deploy.sh destroy    # delete namespace (prompts for confirmation)
 ```
 
-### Option B — Consola web / kubectl (sin cliente oc)
+### Option B — Web console / kubectl (no oc client required)
 
 ```bash
-# Con kubectl
+# With kubectl
 kubectl apply -f deploy/ocp/all-in-one.yaml
 
-# O desde la consola web OCP:
-# 1. Login como kubeadmin
-# 2. "+" (Import YAML) → pegar deploy/ocp/all-in-one.yaml → Create
+# Or from the OCP web console:
+# 1. Login as kubeadmin
+# 2. "+" (Import YAML) → paste deploy/ocp/all-in-one.yaml → Create
 # 3. Builds → BuildConfigs → f1-tickets → Start Build
-# 4. Networking → Routes → f1-tickets → abrir URL
+# 4. Networking → Routes → f1-tickets → open URL
+```
+
+### Hot-deploy in OCP (without image rebuild)
+
+Compiles the WAR locally and copies it directly into the running pod's WildFly instance:
+
+```bash
+# Requires: mvn in PATH + oc session active + pod Running
+./deploy/ocp/deploy.sh hotdeploy
 ```
 
 ### Access
@@ -561,9 +609,9 @@ oc describe bc/f1-tickets -n f1-tickets | grep -A2 "Webhook Generic"
 ### Verify the pipeline
 
 ```bash
-./deploy/ocp/deploy.sh status   # pods + builds + ruta
-./deploy/ocp/deploy.sh build    # forzar build manualmente
-./deploy/ocp/deploy.sh logs     # logs del pod en ejecución
+./deploy/ocp/deploy.sh status   # pods + builds + route
+./deploy/ocp/deploy.sh build    # trigger build manually
+./deploy/ocp/deploy.sh logs     # follow pod logs
 ```
 
 ---
