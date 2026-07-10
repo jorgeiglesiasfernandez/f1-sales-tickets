@@ -1,0 +1,49 @@
+# ==============================================================================
+# 03-build.yaml — ImageStream + BuildConfig
+#
+# The BuildConfig builds the image from GitHub using the Containerfile
+# (IBM AMA / OCI standard). A Generic webhook triggers a new build on
+# every git push to main.
+#
+# Apply: oc apply -f deploy/ocp/manifests/03-build.yaml
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# ImageStream — target for the image produced by the BuildConfig
+# ------------------------------------------------------------------------------
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: f1-tickets
+  namespace: f1-tickets
+
+---
+# ------------------------------------------------------------------------------
+# BuildConfig — builds the image from the GitHub repository
+# ------------------------------------------------------------------------------
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: f1-tickets
+  namespace: f1-tickets
+spec:
+  triggers:
+  - type: Generic
+    generic:
+      secret: f1ocp2026
+      allowEnv: false
+  - type: ImageChange
+  source:
+    type: Git
+    git:
+      uri: https://github.com/jorgeiglesiasfernandez/f1-sales-tickets.git
+      ref: main
+    contextDir: "."
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: f1-tickets:latest

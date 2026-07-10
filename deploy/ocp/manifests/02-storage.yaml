@@ -1,0 +1,21 @@
+# ==============================================================================
+# 02-storage.yaml — PersistentVolumeClaim for PostgreSQL data directory
+#
+# Replace <STORAGE_CLASSNAME> with the appropriate value:
+#   crc-csi-hostpath-provisioner   (CRC / local)
+#   kubevirt-csi-infra-default     (OCP / HCP)
+#
+# Apply: oc apply -f deploy/ocp/manifests/02-storage.yaml
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: f1-pgsql-data
+  namespace: f1-tickets
+spec:
+  storageClassName: <STORAGE_CLASSNAME>
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

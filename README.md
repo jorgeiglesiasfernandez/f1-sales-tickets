@@ -201,19 +201,19 @@ The Containerfile includes standard OCI image labels:
 
 ## Running Locally
 
-[`run-container.sh`](run-container.sh) auto-detects **podman** or **docker** (podman takes priority) and the **native CPU architecture** (`arm64` / `amd64`), passing the correct `--platform` flag automatically. No manual configuration needed on Apple Silicon or x86_64.
+[`deploy/local/run.sh`](deploy/local/run.sh) auto-detects **podman** or **docker** (podman takes priority) and the **native CPU architecture** (`arm64` / `amd64`), passing the correct `--platform` flag automatically. No manual configuration needed on Apple Silicon or x86_64.
 
 ### With the helper script (recommended)
 
 ```bash
-./run-container.sh                # build + run (default)
-./run-container.sh build          # build image for native arch only
-./run-container.sh run            # start container (create if needed)
-./run-container.sh stop           # stop the running container
-./run-container.sh logs           # follow container logs
-./run-container.sh destroy        # remove container and persistent volume
-./run-container.sh multiarch-push # build amd64+arm64 manifest and push to registry
-                                  # requires: export IMAGE_REGISTRY=quay.io/myorg
+./deploy/local/run.sh                # build + run (default)
+./deploy/local/run.sh build          # build image for native arch only
+./deploy/local/run.sh run            # start container (create if needed)
+./deploy/local/run.sh stop           # stop the running container
+./deploy/local/run.sh logs           # follow container logs
+./deploy/local/run.sh destroy        # remove container and persistent volume
+./deploy/local/run.sh multiarch-push # build amd64+arm64 manifest and push to registry
+                                     # requires: export IMAGE_REGISTRY=quay.io/myorg
 ```
 
 ### Manual commands
@@ -262,7 +262,7 @@ podman run -d \
 
 ```bash
 # With podman
-IMAGE_REGISTRY=quay.io/myorg ./run-container.sh multiarch-push
+IMAGE_REGISTRY=quay.io/myorg ./deploy/local/run.sh multiarch-push
 
 # Manually with podman
 podman build --platform linux/amd64,linux/arm64 \
@@ -397,75 +397,118 @@ supervisord (PID 1)       →    Native container process management
 
 ```
 f1-sales-tickets/
-├── Containerfile                     Multi-stage container build (IBM AMA / OCI standard)
-├── pom.xml                           Maven project descriptor
-├── run-container.sh                  Helper script — auto-detects podman/docker, manages lifecycle
+├── Containerfile                          Multi-stage build (IBM AMA / OCI standard)
+├── pom.xml                                Maven project descriptor
+├── README.md
+│
+├── deploy/                                Build & deploy — entry point for all environments
+│   ├── local/
+│   │   └── run.sh                         Local lifecycle: build/run/stop/destroy/logs/multiarch-push
+│   └── ocp/
+│       ├── deploy.sh                      OCP CLI script: apply/build/status/logs/rollout/destroy/webhook
+│       ├── all-in-one.yaml                All resources in one file (web console / kubectl / GitOps)
+│       └── manifests/                     Individual manifests (apply selectively)
+│           ├── 00-project.yaml            ProjectRequest + ClusterRoleBindings (kubeadmin)
+│           ├── 01-secrets.yaml            Secret — PostgreSQL credentials
+│           ├── 02-storage.yaml            PersistentVolumeClaim (replace <STORAGE_CLASSNAME>)
+│           ├── 03-build.yaml              ImageStream + BuildConfig (GitHub → Containerfile)
+│           └── 04-app.yaml               Deployment + Service + Route
+│
 ├── ama/
 │   └── f1-sales-tickets.war_migrationPlan.zip   IBM AMA migration plan (WildFly → Liberty)
-├── config/
-│   ├── supervisord.conf              supervisord process definitions
-│   └── wildfly-ds.cli                WildFly CLI datasource configuration
-├── ocp/
-│   └── deploy-all-in-one.yaml        Full OpenShift deployment manifest (11 resources)
-├── scripts/
-│   ├── entrypoint.sh                    Container entrypoint (PID 1 bootstrap)
-│   ├── deploy.sh                        WildFly deployment helper (host-side)
-│   ├── db/                              Database scripts
-│   │   ├── init-db.sh                   PostgreSQL init — user, schema, seed (auto on first boot)
-│   │   ├── reset-purchases.sh           Reset all purchases to 0 (wipe + free tickets)
+│
+├── config/                                Runtime config (copied into the container image)
+│   ├── supervisord.conf                   supervisord process definitions
+│   └── wildfly-ds.cli                     WildFly CLI datasource configuration
+│
+├── scripts/                               Scripts used inside the container
+│   ├── entrypoint.sh                      PID 1: init PostgreSQL + WildFly DS + supervisord
+│   ├── db/                                Database management scripts
+│   │   ├── init-db.sh                     PostgreSQL init — user, schema, seed (auto on first boot)
+│   │   ├── reset-purchases.sh             Reset all purchases to 0 (wipe + free tickets)
 │   │   └── sql/
-│   │       ├── 01-schema.sql            Database schema (DDL)
-│   │       ├── 02-seed.sql              Initial data (1 event, 1000 tickets)
-│   │       └── 03-purchases-auto.sql    Wave 1 purchases — auto on first boot (300 sold)
-│   └── simulation/                      Simulation scripts (REST API calls)
-│       ├── load-tickets.sh              Load extra tickets at runtime (manual)
-│       ├── simulate-purchases-wave2.sh  Simulate 450 more sales — 75% sold (manual, inside container)
-│       ├── simulate-purchases-wave3.sh  Simulate final 250 sales — SOLD OUT (manual, inside container)
-│       └── simulate-purchases-random.sh Continuous random simulation via REST API (external)
+│   │       ├── 01-schema.sql              Database schema (DDL)
+│   │       ├── 02-seed.sql                Initial data (1 event, 1000 tickets)
+│   │       └── 03-purchases-auto.sql      Wave 1 purchases — auto on first boot (300 sold)
+│   └── simulation/                        Simulation scripts (REST API calls)
+│       ├── load-tickets.sh                Load extra tickets at runtime (manual)
+│       ├── simulate-purchases-wave2.sh    Simulate 450 more sales — 75% sold (manual, inside container)
+│       ├── simulate-purchases-wave3.sh    Simulate final 250 sales — SOLD OUT (manual, inside container)
+│       └── simulate-purchases-random.sh   Continuous random simulation via REST API (external)
+│
 └── src/main/
-    ├── java/com/ticketsales/        Application source code
-    ├── resources/struts.xml         Struts 2 action mappings
-    └── webapp/                      JSP views + web descriptors
+    ├── java/com/ticketsales/              Application source code
+    ├── resources/struts.xml               Struts 2 action mappings
+    └── webapp/                            JSP views + web descriptors
 ```
 
 ---
 
 ## OpenShift Deployment
 
-The [`ocp/deploy-all-in-one.yaml`](ocp/deploy-all-in-one.yaml) manifest deploys all required resources in a single file. It contains 11 resources applied in order. The `BuildConfig` uses `dockerfilePath: Containerfile` (OCI/IBM AMA standard naming).
+Two deployment options are available under [`deploy/ocp/`](deploy/ocp/):
 
-| # | Resource | Description |
-|---|---|---|
-| 1 | `ProjectRequest` | Creates the `f1-tickets` namespace |
-| 2 | `ClusterRoleBinding` anyuid | Allows the pod to run as root (required by PostgreSQL) |
-| 3 | `ClusterRoleBinding` webhook | Allows GitHub to call the OCP webhook without authentication |
-| 4 | `Secret` | PostgreSQL credentials |
-| 5 | `PersistentVolumeClaim` | 2 Gi volume for PostgreSQL data |
-| 6 | `ImageStream` | Target for the image built by the BuildConfig |
-| 7 | `BuildConfig` | Builds the image from GitHub; triggered by webhook on push |
-| 8 | `Deployment` | Runs the WildFly 18 + PostgreSQL 15 monolith |
-| 9 | `Service` | Exposes port 8080 internally |
-| 10 | `Route` | Exposes the app externally with TLS edge termination |
+| File | Use case |
+|---|---|
+| [`deploy/ocp/deploy.sh`](deploy/ocp/deploy.sh) | CLI script — full lifecycle management with `oc` |
+| [`deploy/ocp/all-in-one.yaml`](deploy/ocp/all-in-one.yaml) | Web console / `kubectl apply` / GitOps — no `oc` client needed |
+| [`deploy/ocp/manifests/`](deploy/ocp/manifests/) | Individual YAMLs — apply or update resources selectively |
+
+### Resources
+
+| # | Resource | Manifest | Description |
+|---|---|---|---|
+| 1 | `ProjectRequest` | `00-project.yaml` | Creates the `f1-tickets` namespace |
+| 2 | `ClusterRoleBinding` anyuid | `00-project.yaml` | Allows the pod to run as root (required by PostgreSQL) |
+| 3 | `ClusterRoleBinding` webhook | `00-project.yaml` | Allows GitHub to call the OCP webhook without authentication |
+| 4 | `Secret` | `01-secrets.yaml` | PostgreSQL credentials |
+| 5 | `PersistentVolumeClaim` | `02-storage.yaml` | 2 Gi volume for PostgreSQL data |
+| 6 | `ImageStream` | `03-build.yaml` | Target for the image built by the BuildConfig |
+| 7 | `BuildConfig` | `03-build.yaml` | Builds the image from GitHub; triggered by webhook on push |
+| 8 | `Deployment` | `04-app.yaml` | Runs the WildFly 18 + PostgreSQL 15 monolith |
+| 9 | `Service` | `04-app.yaml` | Exposes port 8080 internally |
+| 10 | `Route` | `04-app.yaml` | Exposes the app externally with TLS edge termination |
 
 ### Prerequisites
 
-Before applying the manifest, replace the following placeholders:
+Before applying, replace the storage class placeholder in [`deploy/ocp/manifests/02-storage.yaml`](deploy/ocp/manifests/02-storage.yaml):
 
 | Placeholder | Description | Example |
 |---|---|---|
 | `<STORAGE_CLASSNAME>` | Storage class for the PVC | `crc-csi-hostpath-provisioner` (CRC) / `kubevirt-csi-infra-default` (OCP) |
 
-### Apply (CLI)
+### Option A — CLI script (recommended)
 
 ```bash
-# Requires kubeadmin session for cluster-scoped resources
-oc apply -f ocp/deploy-all-in-one.yaml
+oc login https://<cluster>:6443 -u kubeadmin -p <pass>
 
-# Trigger the first build manually
-oc start-build f1-tickets -n f1-tickets --follow
+# Reemplazar storage class en el manifest
+sed -i 's/<STORAGE_CLASSNAME>/crc-csi-hostpath-provisioner/' \
+  deploy/ocp/manifests/02-storage.yaml
 
-# Watch the rollout
-oc rollout status deployment/f1-tickets -n f1-tickets
+# Aplicar todo + lanzar primer build + esperar rollout
+./deploy/ocp/deploy.sh apply
+
+# Comandos adicionales
+./deploy/ocp/deploy.sh status   # estado: pods, builds, ruta
+./deploy/ocp/deploy.sh logs     # seguir logs del pod
+./deploy/ocp/deploy.sh build    # lanzar build manualmente
+./deploy/ocp/deploy.sh rollout  # redeploy sin nuevo build
+./deploy/ocp/deploy.sh webhook  # URL del webhook para GitHub
+./deploy/ocp/deploy.sh destroy  # borrar todo (pide confirmación)
+```
+
+### Option B — Consola web / kubectl (sin cliente oc)
+
+```bash
+# Con kubectl
+kubectl apply -f deploy/ocp/all-in-one.yaml
+
+# O desde la consola web OCP:
+# 1. Login como kubeadmin
+# 2. "+" (Import YAML) → pegar deploy/ocp/all-in-one.yaml → Create
+# 3. Builds → BuildConfigs → f1-tickets → Start Build
+# 4. Networking → Routes → f1-tickets → abrir URL
 ```
 
 ### Access
@@ -486,7 +529,7 @@ The `BuildConfig` is configured with a **Generic Webhook** trigger. Every `git p
 ```
 git push main
     └─▶ GitHub Webhook (POST)
-            └─▶ OCP BuildConfig (Docker strategy)
+            └─▶ OCP BuildConfig (Containerfile strategy)
                     └─▶ ImageStream f1-tickets:latest
                             └─▶ Deployment rollout (automatic via image trigger)
 ```
@@ -500,6 +543,8 @@ https://<OCP_API_SERVER>:6443/apis/build.openshift.io/v1/namespaces/f1-tickets/b
 Obtain the URL from the cluster:
 
 ```bash
+./deploy/ocp/deploy.sh webhook
+# or manually:
 oc describe bc/f1-tickets -n f1-tickets | grep -A2 "Webhook Generic"
 ```
 
@@ -516,14 +561,9 @@ oc describe bc/f1-tickets -n f1-tickets | grep -A2 "Webhook Generic"
 ### Verify the pipeline
 
 ```bash
-# Force a build manually
-oc start-build f1-tickets -n f1-tickets --follow
-
-# Watch builds
-oc get builds -n f1-tickets -w
-
-# Watch rollout
-oc rollout status deployment/f1-tickets -n f1-tickets
+./deploy/ocp/deploy.sh status   # pods + builds + ruta
+./deploy/ocp/deploy.sh build    # forzar build manualmente
+./deploy/ocp/deploy.sh logs     # logs del pod en ejecución
 ```
 
 ---

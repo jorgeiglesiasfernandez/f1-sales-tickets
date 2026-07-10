@@ -1,0 +1,102 @@
+# ==============================================================================
+# 04-app.yaml — Deployment + Service + Route
+#
+# Apply: oc apply -f deploy/ocp/manifests/04-app.yaml
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Deployment — runs the WildFly 18 + PostgreSQL 15 monolith
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: f1-tickets
+  namespace: f1-tickets
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"f1-tickets:latest","namespace":"f1-tickets"},
+        "fieldPath":"spec.template.spec.containers[?(@.name==\"f1-tickets\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: f1-tickets
+  template:
+    metadata:
+      labels:
+        app: f1-tickets
+    spec:
+      containers:
+      - name: f1-tickets
+        image: image-registry.openshift-image-registry.svc:5000/f1-tickets/f1-tickets:latest
+        ports:
+        - containerPort: 8080
+        - containerPort: 9990
+        envFrom:
+        - secretRef:
+            name: f1-db-secret
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "768Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+        volumeMounts:
+        - name: pgsql-data
+          mountPath: /var/lib/pgsql/15/data
+          subPath: data
+        readinessProbe:
+          httpGet:
+            path: /f1-tickets
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /f1-tickets
+            port: 8080
+          initialDelaySeconds: 90
+          periodSeconds: 15
+      volumes:
+      - name: pgsql-data
+        persistentVolumeClaim:
+          claimName: f1-pgsql-data
+
+---
+# ------------------------------------------------------------------------------
+# Service — exposes HTTP port 8080 internally
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: f1-tickets
+  namespace: f1-tickets
+spec:
+  selector:
+    app: f1-tickets
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+
+---
+# ------------------------------------------------------------------------------
+# Route — exposes the app externally with TLS edge termination
+#   CRC: http://f1-tickets-f1-tickets.apps-crc.testing/f1-tickets
+#   OCP: https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+# ------------------------------------------------------------------------------
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: f1-tickets
+  namespace: f1-tickets
+spec:
+  to:
+    kind: Service
+    name: f1-tickets
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

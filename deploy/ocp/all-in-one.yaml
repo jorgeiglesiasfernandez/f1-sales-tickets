@@ -1,20 +1,23 @@
 # ==============================================================================
-# f1-sales-tickets — Full deployment on OpenShift (CRC or OCP)
+# deploy/ocp/all-in-one.yaml — Full deployment on OpenShift (CRC or OCP)
 #
-# BEFORE IMPORTING:
+# Contains all resources in a single file. Use this for:
+#   · Web console → "+" icon (Import YAML) → paste the full file
+#   · kubectl apply (without the oc client)
+#   · Argo CD / Flux GitOps
+#
+# BEFORE APPLYING:
 #   1. Replace <STORAGE_CLASSNAME> with the appropriate value:
-#      crc-csi-hostpath-provisioner  (CRC)
-#      kubevirt-csi-infra-default    (OCP / HCP)
-#   2. Cluster-scoped resources (Project, ClusterRoleBinding) require a
-#      kubeadmin session; all other resources can be created as developer.
+#        crc-csi-hostpath-provisioner   (CRC / local)
+#        kubevirt-csi-infra-default     (OCP / HCP)
+#   2. Cluster-scoped resources (ProjectRequest, ClusterRoleBinding) require
+#      a kubeadmin session. All other resources can be created as developer.
 #
-# HOW TO IMPORT:
-#   oc apply -f ocp/deploy-all-in-one.yaml
-#   — or —
-#   Web console → "+" icon (Import YAML) → paste the full file.
+# APPLY (CLI):
+#   oc apply -f deploy/ocp/all-in-one.yaml
+#   kubectl apply -f deploy/ocp/all-in-one.yaml
 #
-# NOTE: The build strategy references "Containerfile" (OCI/IBM AMA standard).
-#       This replaces the previous "Dockerfile" naming convention.
+# NOTE: The BuildConfig references "Containerfile" (OCI / IBM AMA standard).
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -30,6 +33,7 @@ displayName: F1 Sales Tickets
 ---
 # ------------------------------------------------------------------------------
 # 2. ClusterRoleBinding — allows the pod to run as root (anyuid SCC)
+#    Required by PostgreSQL 15 which runs as the "postgres" user.
 #    Requires kubeadmin session
 # ------------------------------------------------------------------------------
 apiVersion: rbac.authorization.k8s.io/v1
@@ -66,7 +70,8 @@ subjects:
 
 ---
 # ------------------------------------------------------------------------------
-# 5. Secret — PostgreSQL credentials
+# 4. Secret — PostgreSQL credentials
+#    ⚠ Change the values before applying in production.
 # ------------------------------------------------------------------------------
 apiVersion: v1
 kind: Secret
@@ -81,8 +86,10 @@ stringData:
 
 ---
 # ------------------------------------------------------------------------------
-# 6. PersistentVolumeClaim — PostgreSQL data directory (2 Gi)
-#    Stays in Pending until the Deployment mounts the volume — this is expected.
+# 5. PersistentVolumeClaim — PostgreSQL data directory (2 Gi)
+#    Replace <STORAGE_CLASSNAME>:
+#      crc-csi-hostpath-provisioner   (CRC / local)
+#      kubevirt-csi-infra-default     (OCP / HCP)
 # ------------------------------------------------------------------------------
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -99,7 +106,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 7. ImageStream — target for the image built by the BuildConfig
+# 6. ImageStream — target for the image built by the BuildConfig
 # ------------------------------------------------------------------------------
 apiVersion: image.openshift.io/v1
 kind: ImageStream
@@ -109,7 +116,11 @@ metadata:
 
 ---
 # ------------------------------------------------------------------------------
-# 8. BuildConfig — builds the image from the GitHub repository
+# 7. BuildConfig — builds the image from the GitHub repository
+#    Webhook secret: f1ocp2026
+#    Trigger URL:
+#      https://<OCP_API>:6443/apis/build.openshift.io/v1/namespaces/f1-tickets/
+#        buildconfigs/f1-tickets/webhooks/f1ocp2026/generic
 # ------------------------------------------------------------------------------
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
@@ -140,7 +151,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 9. Deployment — runs the WildFly 18 + PostgreSQL 15 monolith
+# 8. Deployment — runs the WildFly 18 + PostgreSQL 15 monolith
 # ------------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
@@ -200,7 +211,7 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 10. Service — exposes HTTP port 8080 internally
+# 9. Service — exposes HTTP port 8080 internally
 # ------------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
@@ -217,10 +228,9 @@ spec:
 
 ---
 # ------------------------------------------------------------------------------
-# 11. Route — exposes the app externally
-#    TLS edge termination: the router handles HTTPS and forwards HTTP to the pod.
-#    CRC:  http://f1-tickets-f1-tickets.apps-crc.testing/f1-tickets
-#    OCP:  https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
+# 10. Route — exposes the app externally with TLS edge termination
+#     CRC: http://f1-tickets-f1-tickets.apps-crc.testing/f1-tickets
+#     OCP: https://f1-tickets-f1-tickets.apps.<cluster>/f1-tickets
 # ------------------------------------------------------------------------------
 apiVersion: route.openshift.io/v1
 kind: Route

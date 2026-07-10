@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# run-container.sh — build + ciclo de vida de f1-sales-tickets
+# deploy/local/run.sh — build + ciclo de vida de f1-sales-tickets
 # Stack: WildFly 18 + PostgreSQL 15 (monolito local)
 #
 # Auto-detecta:

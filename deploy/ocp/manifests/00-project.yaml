@@ -1,0 +1,51 @@
+# ==============================================================================
+# 00-project.yaml — Namespace + cluster-scoped permissions
+#
+# Requires: kubeadmin session (ClusterRoleBinding is cluster-scoped)
+# Apply:    oc apply -f deploy/ocp/manifests/00-project.yaml
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Project — namespace f1-tickets
+# ------------------------------------------------------------------------------
+apiVersion: project.openshift.io/v1
+kind: ProjectRequest
+metadata:
+  name: f1-tickets
+displayName: F1 Sales Tickets
+
+---
+# ------------------------------------------------------------------------------
+# 2. ClusterRoleBinding — allows the pod to run as root (anyuid SCC)
+#    Required by PostgreSQL 15 which runs as the "postgres" user.
+# ------------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: f1-tickets-anyuid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: f1-tickets
+
+---
+# ------------------------------------------------------------------------------
+# 3. ClusterRoleBinding — allows anonymous users to trigger webhooks
+#    Required so GitHub can call the BuildConfig webhook endpoint without auth.
+# ------------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: f1-webhook-anonymous
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:webhook
+subjects:
+- kind: User
+  name: system:anonymous
+  apiGroup: rbac.authorization.k8s.io
